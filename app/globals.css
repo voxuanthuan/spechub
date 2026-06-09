@@ -311,6 +311,81 @@ button:disabled,
   border-color: transparent;
 }
 
+.repo-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 32px;
+  gap: 5px;
+  align-items: center;
+  min-width: 0;
+}
+
+.repo-row + .repo-row {
+  margin-top: 2px;
+}
+
+.repo-main {
+  min-width: 0;
+}
+
+.repo-visibility-btn {
+  width: 32px;
+  height: 32px;
+  display: grid;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--c-ink-3);
+  transition: 0.13s;
+}
+
+.repo-visibility-btn:hover {
+  border-color: var(--c-border);
+  background: var(--c-hover);
+  color: var(--accent-strong);
+}
+
+.repo-visibility-btn svg {
+  width: 15px;
+  height: 15px;
+}
+
+.hidden-repos-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin: 14px 2px 5px;
+  padding: 8px 8px 6px;
+  border-top: 1px solid var(--c-border);
+  color: var(--c-ink-3);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.hidden-repos-head b {
+  min-width: 22px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--c-border);
+  color: var(--c-ink-2);
+  font-size: 10px;
+  letter-spacing: 0;
+  text-align: center;
+}
+
+.repo-row.is-muted .repo {
+  color: var(--c-ink-3);
+}
+
+.repo-row.is-muted .repo .dot {
+  background: transparent;
+  border: 1px solid var(--c-border-2);
+}
+
 .app[data-sidebar="collapsed"] .repo .name,
 .app[data-sidebar="collapsed"] .repo .count {
   display: none;
@@ -320,6 +395,15 @@ button:disabled,
   justify-content: center;
   padding-left: 0;
   padding-right: 0;
+}
+
+.app[data-sidebar="collapsed"] .repo-row {
+  grid-template-columns: 1fr;
+}
+
+.app[data-sidebar="collapsed"] .repo-visibility-btn,
+.app[data-sidebar="collapsed"] .hidden-repos-head b {
+  display: none;
 }
 
 .topbar {
@@ -1246,6 +1330,15 @@ button:disabled,
     padding: var(--row-pad-y) 11px;
   }
 
+  .app[data-sidebar="collapsed"] .repo-row {
+    grid-template-columns: minmax(0, 1fr) 32px;
+  }
+
+  .app[data-sidebar="collapsed"] .repo-visibility-btn,
+  .app[data-sidebar="collapsed"] .hidden-repos-head b {
+    display: grid;
+  }
+
   .topbar {
     grid-column: auto;
     flex-wrap: wrap;
@@ -1288,8 +1381,13 @@ button:disabled,
   }
 
   .repo,
+  .repo-row,
   .app[data-sidebar="collapsed"] .repo {
     flex: 0 0 158px;
+  }
+
+  .repo-row {
+    flex-basis: 198px;
   }
 
   .topbar {

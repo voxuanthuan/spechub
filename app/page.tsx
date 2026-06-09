@@ -2,7 +2,7 @@
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 type DocumentKind = "markdown" | "html";
 type DocumentCategory = "plan" | "spec" | "superpowers" | "doc";
@@ -10,6 +10,7 @@ type CategoryFilter = DocumentCategory | "all";
 type DateFilter = "all" | "7" | "30" | "90";
 type Accent = "Green" | "Blue" | "Violet" | "Amber";
 type Density = "compact" | "regular" | "comfy";
+type RepoSummary = { name: string; count: number };
 
 interface DocumentMeta {
   id: string;
@@ -93,6 +94,7 @@ export default function Home() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<DocumentDetail | null>(null);
   const [repo, setRepo] = useState("all");
+  const [hiddenRepos, setHiddenRepos] = useState<string[]>(() => readStoredHiddenRepos());
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<CategoryFilter>("all");
   const [date, setDate] = useState<DateFilter>("all");
@@ -116,6 +118,10 @@ export default function Home() {
     setDensity(readStoredDensity());
     void loadDocs();
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("spechub:hidden-repos", JSON.stringify(hiddenRepos));
+  }, [hiddenRepos]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -176,10 +182,23 @@ export default function Home() {
   }, [fullView]);
 
   const repos = useMemo(() => summarizeRepos(docs), [docs]);
+  const hiddenRepoSet = useMemo(() => new Set(hiddenRepos), [hiddenRepos]);
+  const visibleRepos = useMemo(() => repos.filter((item) => !hiddenRepoSet.has(item.name)), [hiddenRepoSet, repos]);
+  const hiddenRepoSummaries = useMemo(() => repos.filter((item) => hiddenRepoSet.has(item.name)), [hiddenRepoSet, repos]);
+  const visibleDocCount = useMemo(() => docs.filter((doc) => !hiddenRepoSet.has(doc.repoName)).length, [docs, hiddenRepoSet]);
   const filteredDocs = useMemo(
-    () => filterDocs(docs, { repo, query, category, date, path }),
-    [category, date, docs, path, query, repo]
+    () => filterDocs(docs, { repo, query, category, date, path, hiddenRepos }),
+    [category, date, docs, hiddenRepos, path, query, repo]
   );
+
+  useEffect(() => {
+    if (repo !== "all" && hiddenRepoSet.has(repo)) {
+      setRepo("all");
+    }
+    if (selectedDoc && hiddenRepoSet.has(selectedDoc.repoName)) {
+      setSelectedId(filteredDocs[0]?.id ?? null);
+    }
+  }, [filteredDocs, hiddenRepoSet, repo, selectedDoc]);
 
   async function loadDocs() {
     setSummary("Indexing local files...");
@@ -253,6 +272,23 @@ export default function Home() {
     }
   }
 
+  function hideRepo(name: string) {
+    const nextHiddenRepos = normalizeRepoNames([...hiddenRepos, name]);
+    const nextHiddenRepoSet = new Set(nextHiddenRepos);
+    setHiddenRepos(nextHiddenRepos);
+    if (repo === name) {
+      setRepo("all");
+    }
+    if (selectedDoc?.repoName === name) {
+      setSelectedId(docs.find((doc) => !nextHiddenRepoSet.has(doc.repoName))?.id ?? null);
+    }
+  }
+
+  function reopenRepo(name: string) {
+    setHiddenRepos((current) => current.filter((item) => item !== name));
+    setRepo(name);
+  }
+
   const rawHref = useMemo(() => {
     if (!selectedDoc) return "#";
     if (selectedDoc.rawUrl) return selectedDoc.rawUrl;
@@ -296,15 +332,41 @@ export default function Home() {
             <button className="repo" type="button" aria-selected={repo === "all"} onClick={() => setRepo("all")}>
               <span className="dot" />
               <span className="name">All repos</span>
-              <span className="count">{docs.length}</span>
+              <span className="count">{visibleDocCount}</span>
             </button>
-            {repos.map((item) => (
-              <button className="repo" key={item.name} type="button" aria-selected={repo === item.name} onClick={() => setRepo(item.name)}>
-                <span className="dot" />
-                <span className="name">{item.name}</span>
-                <span className="count">{item.count}</span>
-              </button>
+            {visibleRepos.map((item) => (
+              <RepoFilterRow
+                item={item}
+                key={item.name}
+                selected={repo === item.name}
+                onSelect={() => setRepo(item.name)}
+                onToggle={() => hideRepo(item.name)}
+                toggleLabel={`Hide ${item.name}`}
+                toggleTitle="Hide repository"
+                icon={<EyeOffIcon />}
+              />
             ))}
+            {hiddenRepoSummaries.length > 0 ? (
+              <>
+                <div className="hidden-repos-head">
+                  <span>Hidden</span>
+                  <b>{hiddenRepoSummaries.length}</b>
+                </div>
+                {hiddenRepoSummaries.map((item) => (
+                  <RepoFilterRow
+                    item={item}
+                    key={item.name}
+                    selected={false}
+                    muted
+                    onSelect={() => reopenRepo(item.name)}
+                    onToggle={() => reopenRepo(item.name)}
+                    toggleLabel={`Show ${item.name}`}
+                    toggleTitle="Show repository"
+                    icon={<EyeIcon />}
+                  />
+                ))}
+              </>
+            ) : null}
           </nav>
         </aside>
 
@@ -528,15 +590,17 @@ function isDesktop() {
 
 export function filterDocs(
   docs: DocumentMeta[],
-  filters: { repo: string; query: string; category: CategoryFilter; date: DateFilter; path: string }
+  filters: { repo: string; query: string; category: CategoryFilter; date: DateFilter; path: string; hiddenRepos?: readonly string[] }
 ) {
   const now = Date.now();
   const query = filters.query.trim().toLowerCase();
   const pathFilter = filters.path.trim().toLowerCase();
   const maxAge = filters.date === "all" ? null : Number(filters.date) * 24 * 60 * 60 * 1000;
+  const hiddenRepoSet = new Set(filters.hiddenRepos ?? []);
 
   return docs.filter((doc) => {
     const haystack = `${doc.title} ${doc.repoName} ${doc.relativePath} ${doc.kind} ${doc.category}`.toLowerCase();
+    if (hiddenRepoSet.has(doc.repoName)) return false;
     if (filters.repo !== "all" && doc.repoName !== filters.repo) return false;
     if (filters.category !== "all" && doc.category !== filters.category) return false;
     if (query && !haystack.includes(query)) return false;
@@ -546,12 +610,45 @@ export function filterDocs(
   });
 }
 
-function summarizeRepos(docs: DocumentMeta[]) {
+function summarizeRepos(docs: DocumentMeta[]): RepoSummary[] {
   const counts = new Map<string, number>();
   for (const doc of docs) counts.set(doc.repoName, (counts.get(doc.repoName) ?? 0) + 1);
   return [...counts.entries()]
     .map(([name, count]) => ({ name, count }))
     .sort((left, right) => left.name.localeCompare(right.name));
+}
+
+function RepoFilterRow({
+  item,
+  selected,
+  muted = false,
+  onSelect,
+  onToggle,
+  toggleLabel,
+  toggleTitle,
+  icon
+}: {
+  item: RepoSummary;
+  selected: boolean;
+  muted?: boolean;
+  onSelect: () => void;
+  onToggle: () => void;
+  toggleLabel: string;
+  toggleTitle: string;
+  icon: ReactNode;
+}) {
+  return (
+    <div className={`repo-row${muted ? " is-muted" : ""}`}>
+      <button className="repo repo-main" type="button" aria-selected={selected} onClick={onSelect}>
+        <span className="dot" />
+        <span className="name">{item.name}</span>
+        <span className="count">{item.count}</span>
+      </button>
+      <button className="repo-visibility-btn" type="button" title={toggleTitle} aria-label={toggleLabel} onClick={onToggle}>
+        {icon}
+      </button>
+    </div>
+  );
 }
 
 function renderPreview(doc: DocumentDetail | null) {
@@ -598,6 +695,21 @@ function readStoredDensity(): Density {
   return stored === "compact" || stored === "comfy" ? stored : "regular";
 }
 
+function readStoredHiddenRepos() {
+  if (typeof window === "undefined") return [];
+  try {
+    const parsed = JSON.parse(window.localStorage.getItem("spechub:hidden-repos") ?? "[]");
+    return Array.isArray(parsed) ? normalizeRepoNames(parsed) : [];
+  } catch {
+    return [];
+  }
+}
+
+function normalizeRepoNames(names: unknown[]) {
+  return [...new Set(names.filter((name): name is string => typeof name === "string" && name.trim().length > 0))]
+    .sort((left, right) => left.localeCompare(right));
+}
+
 function SearchIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>;
 }
@@ -608,6 +720,14 @@ function ChevronIcon() {
 
 function RefreshIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4" /><path d="M21 3v5h-5" /></svg>;
+}
+
+function EyeIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" /><circle cx="12" cy="12" r="3" /></svg>;
+}
+
+function EyeOffIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 3 18 18" /><path d="M10.6 10.6A3 3 0 0 0 13.4 13.4" /><path d="M9.9 4.2A10.7 10.7 0 0 1 12 4c6.5 0 10 8 10 8a17.4 17.4 0 0 1-2.7 3.7" /><path d="M6.6 6.6C3.6 8.7 2 12 2 12s3.5 8 10 8a10.9 10.9 0 0 0 4.7-1" /></svg>;
 }
 
 function FileIcon() {
