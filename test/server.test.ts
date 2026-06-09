@@ -46,6 +46,20 @@ describe("server routes", () => {
   it("updates and clears document title overrides without editing source files", async () => {
     const root = await fixtureRoot();
     const configPath = path.join(root, "spechub-config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        roots: [root],
+        sources: [
+          {
+            name: "repositories",
+            mode: "repositories",
+            roots: [root],
+            patterns: ["docs/specs/**/*.{md,html}"]
+          }
+        ]
+      })
+    );
     const app = createApp({ roots: [root], configPath });
 
     const list = await request(app).get("/api/docs").expect(200);

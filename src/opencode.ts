@@ -44,7 +44,7 @@ export async function readOpenCodePlanContent(dbPath: string, sessionId: string)
   try {
     const session = selectRows<SessionRow>(
       db,
-      "SELECT id, title, directory, time_created, time_updated FROM session WHERE id = ? AND agent = 'plan' LIMIT 1",
+      "SELECT id, title, directory, time_created, time_updated FROM session WHERE id = ? AND (agent = 'plan' OR agent = 'explore' OR agent = '' OR agent IS NULL) LIMIT 1",
       [sessionId]
     )[0];
     if (!session) {
@@ -79,7 +79,7 @@ async function scanOpenCodeDbPath(
       `
         SELECT id, title, directory, time_created, time_updated
         FROM session
-        WHERE agent = 'plan'
+        WHERE agent = 'plan' OR agent = 'explore' OR agent = '' OR agent IS NULL
         ORDER BY COALESCE(time_updated, time_created, 0) DESC
         LIMIT ${MAX_PLAN_SESSIONS}
       `

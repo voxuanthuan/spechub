@@ -133,7 +133,7 @@ fn list_plan_sessions(conn: &Connection) -> Result<Vec<SessionRow>, String> {
         .prepare(&format!(
             "SELECT id, title, directory, time_created, time_updated
              FROM session
-             WHERE agent = 'plan'
+             WHERE agent = 'plan' OR agent = 'explore' OR agent = '' OR agent IS NULL
              ORDER BY COALESCE(time_updated, time_created, 0) DESC
              LIMIT {MAX_PLAN_SESSIONS}"
         ))
@@ -151,7 +151,7 @@ fn load_session(conn: &Connection, session_id: &str) -> Result<Option<SessionRow
         .prepare(
             "SELECT id, title, directory, time_created, time_updated
              FROM session
-             WHERE id = ?1 AND agent = 'plan'
+             WHERE id = ?1 AND (agent = 'plan' OR agent = 'explore' OR agent = '' OR agent IS NULL)
              LIMIT 1",
         )
         .map_err(|error| error.to_string())?;
