@@ -1,6 +1,8 @@
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import os from "node:os";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { defaultConfig } from "../src/config.js";
 import { scanDocuments } from "../src/scanner.js";
 
 async function fixtureRoot() {
@@ -156,6 +158,32 @@ describe("scanDocuments", () => {
       sourceName: "claude-plans",
       category: "plan",
       relativePath: "harmonic-chasing-token.md"
+    });
+  });
+
+  it("includes common agent folders in the default source list", () => {
+    const sourceByName = new Map(defaultConfig().sources.map((source) => [source.name, source]));
+
+    expect([...sourceByName.keys()]).toEqual([
+      "repositories",
+      "opencode",
+      "codex",
+      "claude",
+      "cursor",
+      "augment",
+      "windsurf"
+    ]);
+    expect(sourceByName.get("opencode")).toMatchObject({
+      mode: "direct",
+      roots: [path.join(os.homedir(), ".opencode")],
+      patterns: ["**/*.{md,markdown,html}"],
+      inferRepoFromContent: true,
+      defaultCategory: "plan"
+    });
+    expect(sourceByName.get("claude")).toMatchObject({
+      mode: "direct",
+      roots: [path.join(os.homedir(), ".claude")],
+      patterns: ["**/*.{md,markdown,html}"]
     });
   });
 });

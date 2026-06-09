@@ -37,20 +37,21 @@ export function expandHome(input: string): string {
 export function defaultConfig(): SpecHubConfig {
   const roots = ["~/workspace", "~/.multica/server"].map(expandHome);
   const docPatterns = [...DEFAULT_DOC_PATTERNS];
+  const agentSourceNames = ["opencode", "codex", "claude", "cursor", "augment", "windsurf"];
   return {
     roots,
     ignorePatterns: [...DEFAULT_IGNORE_PATTERNS],
     docPatterns,
     sources: [
       legacySource(roots, docPatterns),
-      {
-        name: "claude-plans",
-        mode: "direct",
-        roots: ["~/.claude/plans"].map(expandHome),
-        patterns: ["*.md", "*.markdown"],
+      ...agentSourceNames.map((name) => ({
+        name,
+        mode: "direct" as const,
+        roots: [expandHome(`~/.${name}`)],
+        patterns: ["**/*.{md,markdown,html}"],
         inferRepoFromContent: true,
-        defaultCategory: "plan"
-      }
+        defaultCategory: "plan" as const
+      }))
     ],
     titleOverrides: {}
   };
@@ -102,7 +103,10 @@ function normalizeSources(
 
   const roots = (config.roots ?? fallback.roots).map(expandHome);
   const docPatterns = config.docPatterns ?? fallback.docPatterns;
-  return [legacySource(roots, docPatterns)];
+  return [
+    legacySource(roots, docPatterns),
+    ...fallback.sources.filter((source) => source.mode === "direct")
+  ];
 }
 
 export async function loadConfig(configPath = DEFAULT_CONFIG_PATH): Promise<Partial<SpecHubConfig>> {
