@@ -1,224 +1,83 @@
 # SpecHub
 
-SpecHub is a local browser dashboard for finding, reading, and organizing AI-generated specs, implementation plans, and HTML reports across your workspace.
+**A local dashboard for the specs, plans, and HTML reports your AI agents leave across your machine.**
 
-It indexes local repositories and agent folders, groups documents by repository, renders Markdown safely, previews HTML in a sandboxed frame, and lets you open or copy the original file paths without moving your documents into a hosted service.
+SpecHub scans your workspaces, groups agent output by repository, renders Markdown safely, previews HTML artifacts, and lets you jump back to the original file. No upload. No hosted account. Just a fast local index for agent-driven work.
 
-## What It Does
+![SpecHub dashboard](.github/assets/spechub-dashboard.png)
 
-- Scans one or more local folders for Markdown and HTML documents.
-- Detects document type such as `spec`, `plan`, `doc`, or `superpowers` from file paths.
-- Groups documents by repository and supports direct global folders like `~/.claude/plans`.
-- Indexes OpenCode plan-mode sessions from the local OpenCode database (`~/.local/share/opencode`) as readable Markdown.
-- Provides browser filters for repository, document type, date, path, and search text.
-- Renders Markdown with sanitized HTML and GitHub-flavored Markdown support.
-- Previews HTML documents in a restricted iframe.
-- Lets you copy file paths, open source files, open folders, and override display titles.
-- Ships a built-in prompt gallery that embeds the original html-effectiveness prompt/result pages for browser-first use.
+## Why Use It
 
-## Quick Start: Browser Dashboard
+- Find specs and implementation plans across many repos without remembering where an agent saved them.
+- Read Markdown and sandboxed HTML reports in one browser UI.
+- Filter by repo, type, path, date, and text when your agent output gets noisy.
+- Keep everything local on disk.
 
-Install SpecHub:
+## Install
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/voxuanthuan/spechub/main/install.sh | sh
 ```
 
-Open SpecHub in your browser:
+## Use
 
 ```sh
 spechub --open
 ```
 
-The command prints a local URL such as:
-
-```txt
-SpecHub dashboard: http://127.0.0.1:43210
-```
-
-SpecHub only serves a local dashboard from your machine. Your documents stay on disk.
-
-## Scan Specific Folders
-
-By default, SpecHub scans common workspace locations. To choose folders explicitly:
+Scan specific workspaces:
 
 ```sh
 spechub --roots ~/workspace ~/projects --open
 ```
 
-## Configuration
+SpecHub prints a local URL like `http://127.0.0.1:43210`.
 
-SpecHub reads config from:
+## How It Works
+
+```mermaid
+flowchart LR
+  A[AI agents write specs, plans, reports] --> B[SpecHub scans local folders]
+  B --> C[Dashboard groups docs by repo]
+  C --> D[Search, filter, read]
+  D --> E[Open source file or folder]
+```
+
+SpecHub looks for common files such as:
+
+- `docs/**/*.{md,markdown,html}`
+- `docs/specs/**/*.{md,html}`
+- `docs/plans/**/*.md`
+- `specs/**/*.{md,html}`
+- `Spec.md`, `spec.md`, `plan.md`
+- OpenCode plan sessions from `~/.local/share/opencode`
+
+## Configure
+
+Optional config lives at:
 
 ```txt
 ~/.config/spechub/config.json
 ```
 
-Example:
+Minimal example:
 
 ```json
 {
   "roots": ["~/workspace"],
-  "ignorePatterns": [".git", "node_modules", "dist", "build", ".next", "coverage", "vendor"],
-  "docPatterns": [
-    "docs/**/*.{md,markdown,html}",
-    "docs/superpowers/**/*.{md,html}",
-    "docs/plans/**/*.md",
-    "docs/specs/**/*.{md,html}",
-    "specs/**/*.{md,html}",
-    "Spec.md",
-    "spec.md",
-    "plan.md"
-  ],
-  "sources": [
-    {
-      "name": "repositories",
-      "mode": "repositories",
-      "roots": ["~/workspace"],
-      "patterns": [
-        "docs/**/*.{md,markdown,html}",
-        "specs/**/*.{md,markdown,html}",
-        "Spec.md",
-        "spec.md",
-        "plan.md"
-      ]
-    },
-    {
-      "name": "claude-plans",
-      "mode": "direct",
-      "roots": ["~/.claude/plans"],
-      "patterns": ["*.md", "*.markdown"],
-      "inferRepoFromContent": true,
-      "defaultCategory": "plan"
-    },
-    {
-      "name": "opencode-plan-sessions",
-      "mode": "opencode-db",
-      "roots": ["~/.local/share/opencode"],
-      "patterns": [],
-      "inferRepoFromContent": true,
-      "defaultCategory": "plan"
-    }
-  ],
+  "ignorePatterns": [".git", "node_modules", "dist", "build", ".next"],
   "titleOverrides": {
     "~/workspace/my-repo/docs/specs/api.md": "API Redesign Spec"
   }
 }
 ```
 
-If `sources` is omitted, SpecHub uses the legacy `roots` and `docPatterns` repository scan behavior.
-
-Use `mode: "repositories"` when each child folder is a project repository. Use `mode: "direct"` for global agent folders such as `~/.claude`, `~/.codex`, or shared notes folders. Use `mode: "opencode-db"` to index OpenCode plan-mode sessions stored in a local SQLite database; the source's `roots` should point at directories containing `opencode.db` files (defaults to `~/.local/share/opencode`).
-
-`titleOverrides` only changes the display title in SpecHub. It does not edit the source Markdown or HTML file.
-
-## How SpecHub Works
-
-SpecHub has three main parts:
-
-```txt
-CLI command
-  starts local Express server
-  loads config and scans local files
-  serves API routes and browser dashboard
-
-Scanner
-  walks configured roots
-  ignores build/dependency folders
-  classifies documents by path and extension
-  returns document metadata
-
-Browser UI
-  fetches /api/docs
-  filters and groups documents
-  fetches /api/docs/:id for the selected file
-  renders Markdown or sandboxed HTML preview
-```
-
-### Runtime Flow
-
-1. `spechub --open` starts a local server on `127.0.0.1`.
-2. The server resolves config from CLI flags and `~/.config/spechub/config.json`.
-3. The scanner finds matching Markdown and HTML files.
-4. The browser dashboard calls `/api/docs` to list documents.
-5. Selecting a document calls `/api/docs/:id`.
-6. Markdown is rendered and sanitized on the server. HTML is served through `/raw/:id` and previewed in a sandboxed iframe.
-
-## Project Architecture
-
-```txt
-app/
-  Next.js browser dashboard
-
-src/
-  cli.ts        command-line entrypoint
-  server.ts     local Express app and API routes
-  scanner.ts    document discovery and classification
-  config.ts     config loading and title overrides
-  markdown.ts   Markdown rendering and sanitization
-  opener.ts     local file/folder open helpers
-
-test/
-  scanner, server, renderer, desktop, and UI behavior tests
-
-src-tauri/
-  optional desktop wrapper around the same exported browser UI
-```
-
-The browser dashboard is exported with Next.js into `out/`. The Express server serves that exported UI and provides the local API routes used by the dashboard.
-
-## Browser Controls
-
-SpecHub has two browser views:
-
-- `Documents`: scanned local specs, plans, Markdown files, and HTML artifacts.
-- `Prompts`: embedded html-effectiveness prompt/result pages grouped by common engineering and design work.
-
-Document controls:
-
-- Search: title, repository, path, extension, and category text.
-- Repository rail: limit the document list to one repository.
-- Type: filter by `spec`, `plan`, `doc`, or `superpowers`.
-- Date: show recently modified documents.
-- Path: narrow results to a folder such as `docs/specs`.
-- Refresh: rescan local files.
-- Full view: open a larger reading modal.
-- `/`: focus search.
-- `F`: open full view for the selected document.
-- `Esc`: close full view.
-
-Prompt controls:
-
-- Category rail: browse prompt groups such as planning, code review, design, diagrams, reports, and custom editors.
-- Search: find source pages by title, description, tag, or original URL.
-- Tag: narrow prompts by work style such as `diagram`, `pr`, `prototype`, or `report`.
-- Copy source URL: copy the original html-effectiveness page URL.
-- Open original: open the source page in a new browser tab.
-- Embedded preview: inspect the exact original prompt/result page inside SpecHub.
-
-## Development
-
-Install from a cloned checkout:
+## Develop
 
 ```sh
 pnpm install
 pnpm build
-./install.sh
-spechub --open
-```
-
-`./install.sh` symlinks the built CLI into `$HOME/.local/bin/spechub` (override with `SPECHUB_BIN_DIR`). If that directory is not on your `PATH`, the script prints the line to add to your shell config.
-
-Run the browser dashboard during development (Express API + the exported Next.js UI, which is what `spechub --open` ships):
-
-```sh
 pnpm dev:browser
-```
-
-Run the Next.js frontend only (no Express server, so `/api/docs` and `/raw/:id` are unavailable — useful for UI styling work):
-
-```sh
-pnpm dev:web
 ```
 
 Run checks:
@@ -229,8 +88,6 @@ pnpm test
 pnpm build
 ```
 
-## Notes
+## Local First
 
-SpecHub is local-first. It is designed for personal and team workstations where specs and plans already live in local repositories or agent output folders.
-
-The desktop/Tauri app exists, but the browser dashboard is the primary supported flow for now.
+SpecHub serves a dashboard from your own machine and reads files already on your disk. It is built for developers using Codex, Claude Code, OpenCode, and other AI agents that generate lots of planning artifacts across many repositories.
