@@ -161,7 +161,7 @@ function createOpenCodePlanMeta(
   const absolutePath = `${path.resolve(dbPath)}#${session.id}`;
   const title = cleanTitle(session.title) || "OpenCode Plan";
   const directory = typeof session.directory === "string" ? path.resolve(session.directory) : undefined;
-  const repo = directory ? { root: directory, name: path.basename(directory) } : inferRepo(text, repoHints);
+  const repo = resolveRepo(directory, text, repoHints);
   const mtimeMs = Number(session.time_updated ?? session.time_created ?? fallbackMtimeMs);
 
   return {
@@ -211,6 +211,23 @@ function parseJsonObject(input: string): Record<string, unknown> {
   } catch {
     return {};
   }
+}
+
+function resolveRepo(directory: string | undefined, raw: string, repoHints: RepoHint[]): RepoHint | undefined {
+  if (directory) {
+    const matchedHint = findHintByPath(directory, repoHints);
+    if (matchedHint) return matchedHint;
+    return { root: directory, name: path.basename(directory) };
+  }
+  return inferRepo(raw, repoHints);
+}
+
+function findHintByPath(absolutePath: string, repoHints: RepoHint[]): RepoHint | undefined {
+  if (repoHints.length === 0) return undefined;
+  const normalized = normalizePath(path.resolve(absolutePath));
+  return [...repoHints]
+    .sort((left, right) => right.root.length - left.root.length)
+    .find((repo) => normalized === repo.root || normalized.startsWith(`${repo.root}/`));
 }
 
 function inferRepo(raw: string, repoHints: RepoHint[]): RepoHint | undefined {

@@ -302,6 +302,40 @@ describe("scanDocuments", () => {
     ]);
   });
 
+  it("prefers the containing folder over content matches when naming a repo", async () => {
+    const root = await fixtureRoot();
+    const workspace = path.join(root, "work");
+    const grappleRepo = path.join(workspace, "grapple-b2b-app");
+    const siblingRepo = path.join(workspace, "B2B-app");
+    const grappleDoc = path.join(grappleRepo, "docs", "superpowers", "specs", "sync.md");
+    await mkdir(path.dirname(grappleDoc), { recursive: true });
+    await mkdir(siblingRepo, { recursive: true });
+    await writeFile(path.join(grappleRepo, "package.json"), "{}");
+    await writeFile(path.join(siblingRepo, "package.json"), "{}");
+    await writeFile(
+      grappleDoc,
+      `# B2B-app: V2 Grapple Connect Sync History\n\nReferences \`${siblingRepo}\` and the B2B-app project throughout.\n`
+    );
+
+    const docs = await scanDocuments({
+      roots: [workspace],
+      sources: [
+        {
+          name: "stray-direct",
+          mode: "direct",
+          roots: [workspace],
+          patterns: ["**/docs/**/*.md"],
+          inferRepoFromContent: true,
+          defaultCategory: "spec"
+        }
+      ]
+    });
+
+    const indexed = docs.find((doc) => doc.absolutePath === grappleDoc);
+    expect(indexed).toBeDefined();
+    expect(indexed?.repoName).toBe("grapple-b2b-app");
+  });
+
   it("indexes OpenCode /plan sessions from SQLite storage", async () => {
     const root = await fixtureRoot();
     const dataRoot = path.join(root, ".local", "share", "opencode");

@@ -189,6 +189,8 @@ async function createDocumentMeta(
     const [stats, raw] = await Promise.all([stat(absolutePath), readFile(absolutePath, "utf8")]);
     const sourceTitle = extractTitle(raw, relativePath, kind);
     const override = titleOverrides[normalizeOverridePath(absolutePath)];
+    const pathRepo = findRepoByPath(absolutePath, repoHints);
+    const contentRepo = pathRepo ? undefined : inferRepoName(raw, repoHints);
     return {
       id: documentId(absolutePath),
       title: override ?? sourceTitle,
@@ -198,7 +200,7 @@ async function createDocumentMeta(
       sourceName,
       absolutePath,
       relativePath: normalizePath(relativePath),
-      repoName: inferRepoName(raw, repoHints) ?? repoNameOverride ?? path.basename(repoRoot),
+      repoName: pathRepo?.name ?? contentRepo ?? repoNameOverride ?? path.basename(repoRoot),
       repoRoot,
       modifiedAt: stats.mtime.toISOString(),
       mtimeMs: stats.mtimeMs,
@@ -207,6 +209,14 @@ async function createDocumentMeta(
   } catch {
     return null;
   }
+}
+
+function findRepoByPath(absolutePath: string, repoHints: RepoHint[]): RepoHint | undefined {
+  if (repoHints.length === 0) return undefined;
+  const normalized = normalizePath(path.resolve(absolutePath));
+  return [...repoHints]
+    .sort((left, right) => right.root.length - left.root.length)
+    .find((repo) => normalized === repo.root || normalized.startsWith(`${repo.root}/`));
 }
 
 function inferRepoName(raw: string, repoHints: RepoHint[]): string | undefined {
