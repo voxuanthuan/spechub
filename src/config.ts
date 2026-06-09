@@ -15,8 +15,16 @@ export const DEFAULT_IGNORE_PATTERNS = [
 ];
 
 export const DEFAULT_DOC_PATTERNS = [
+  ".opencode/agents/**/*.{md,markdown,html}",
   "docs/**/*.{md,markdown,html}",
+  "docs/superpowers/plans/**/*.{md,markdown,html}",
+  "docs/superpowers/specs/**/*.{md,markdown,html}",
   "docs/superpowers/**/*.{md,html}",
+  "docs/supperpowers/plans/**/*.{md,markdown,html}",
+  "docs/supperpowers/specs/**/*.{md,markdown,html}",
+  "docs/supperpowers/**/*.{md,html}",
+  "docs/supperspowers/plans/**/*.{md,markdown,html}",
+  "docs/supperspowers/specs/**/*.{md,markdown,html}",
   "docs/supperspowers/**/*.{md,html}",
   "docs/plans/**/*.md",
   "docs/specs/**/*.{md,html}",
@@ -29,6 +37,7 @@ export const DEFAULT_DOC_PATTERNS = [
 export const DEFAULT_CONFIG_PATH = "~/.config/spechub/config.json";
 
 const DEFAULT_AGENT_DOC_PATTERNS = [
+  "agents/**/*.{md,markdown,html}",
   "plans/**/*.{md,markdown,html}",
   "plan/**/*.{md,markdown,html}",
   "specs/**/*.{md,markdown,html}",
@@ -54,14 +63,28 @@ export function defaultConfig(): SpecHubConfig {
     docPatterns,
     sources: [
       legacySource(roots, docPatterns),
-      ...DEFAULT_AGENT_SOURCE_NAMES.map((name) => ({
-        name,
-        mode: "direct" as const,
-        roots: defaultAgentRoots(name),
-        patterns: [...DEFAULT_AGENT_DOC_PATTERNS],
-        inferRepoFromContent: true,
-        defaultCategory: "plan" as const
-      }))
+      ...DEFAULT_AGENT_SOURCE_NAMES.flatMap((name) => [
+        {
+          name,
+          mode: "direct" as const,
+          roots: defaultAgentRoots(name),
+          patterns: [...DEFAULT_AGENT_DOC_PATTERNS],
+          inferRepoFromContent: true,
+          defaultCategory: "plan" as const
+        },
+        ...(name === "opencode"
+          ? [
+              {
+                name: "opencode-plan-sessions",
+                mode: "opencode-db" as const,
+                roots: [expandHome("~/.local/share/opencode")],
+                patterns: [],
+                inferRepoFromContent: true,
+                defaultCategory: "plan" as const
+              }
+            ]
+          : [])
+      ]),
     ],
     titleOverrides: {}
   };
@@ -70,6 +93,7 @@ export function defaultConfig(): SpecHubConfig {
 function defaultAgentRoots(name: string): string[] {
   const roots = [expandHome(`~/.${name}`)];
   if (name === "opencode") {
+    roots.push(expandHome("~/.config/opencode"));
     roots.push(expandHome("~/.local/share/opencode"));
   }
   return roots;
@@ -92,8 +116,12 @@ function legacySource(roots: string[], docPatterns: string[]): SpecHubSource {
     name: "repositories",
     mode: "repositories",
     roots,
-    patterns: docPatterns
+    patterns: mergeDefaultDocPatterns(docPatterns)
   };
+}
+
+function mergeDefaultDocPatterns(docPatterns: string[]): string[] {
+  return [...new Set([...docPatterns, ...DEFAULT_DOC_PATTERNS])];
 }
 
 function normalizeSources(
@@ -109,7 +137,7 @@ function normalizeSources(
       name: source.name,
       mode: source.mode,
       roots: source.roots.map(expandHome),
-      patterns: [...source.patterns],
+      patterns: source.mode === "repositories" ? mergeDefaultDocPatterns(source.patterns) : [...source.patterns],
       inferRepoFromContent: source.inferRepoFromContent,
       defaultCategory: source.defaultCategory
     }));
@@ -123,7 +151,7 @@ function normalizeSources(
   const docPatterns = config.docPatterns ?? fallback.docPatterns;
   return [
     legacySource(roots, docPatterns),
-    ...fallback.sources.filter((source) => source.mode === "direct")
+    ...fallback.sources.filter((source) => source.name !== "repositories")
   ];
 }
 
@@ -179,7 +207,7 @@ export async function resolveConfig(options: {
   const fileConfig = await loadConfig(options.configPath ?? DEFAULT_CONFIG_PATH);
 
   const roots = (options.roots?.length ? options.roots : fileConfig.roots ?? base.roots).map(expandHome);
-  const docPatterns = fileConfig.docPatterns ?? base.docPatterns;
+  const docPatterns = mergeDefaultDocPatterns(fileConfig.docPatterns ?? base.docPatterns);
 
   return {
     roots,

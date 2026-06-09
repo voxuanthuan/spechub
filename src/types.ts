@@ -1,6 +1,10 @@
 export type DocumentKind = "markdown" | "html";
 export type DocumentCategory = "plan" | "spec" | "superpowers" | "doc";
-export type SourceMode = "repositories" | "direct";
+export type SourceMode = "repositories" | "direct" | "opencode-db";
+
+export type DocumentContentSource =
+  | { type: "file" }
+  | { type: "opencode-db"; dbPath: string; sessionId: string };
 
 export interface SpecHubSource {
   name: string;
@@ -35,6 +39,7 @@ export interface DocumentMeta {
   modifiedAt: string;
   mtimeMs: number;
   sizeBytes: number;
+  contentSource?: DocumentContentSource;
 }
 
 export interface DocumentDetail extends DocumentMeta {

@@ -30,7 +30,8 @@
     "open": "^10.1.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
-    "sanitize-html": "^2.13.0"
+    "sanitize-html": "^2.13.0",
+    "sql.js": "^1.14.1"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.2",
@@ -40,6 +41,7 @@
     "@types/react": "^19.2.17",
     "@types/react-dom": "^19.2.3",
     "@types/sanitize-html": "^2.11.0",
+    "@types/sql.js": "^1.4.11",
     "@types/supertest": "^6.0.2",
     "supertest": "^7.0.0",
     "tsx": "^4.16.2",

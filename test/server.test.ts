@@ -1,6 +1,7 @@
 import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import initSqlJs from "sql.js";
 import request from "supertest";
 import { createApp } from "../src/server.js";
 
@@ -68,4 +69,100 @@ describe("server routes", () => {
     const restored = await request(app).get(`/api/docs/${md.id}`).expect(200);
     expect(restored.body.doc.title).toBe("Design");
   });
+
+  it("serves OpenCode plan session documents from SQLite storage", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-server-opencode-"));
+    const dataRoot = path.join(root, "opencode");
+    const repo = path.join(root, "workspace", "core-api");
+    await mkdir(dataRoot, { recursive: true });
+    await mkdir(repo, { recursive: true });
+    await writeFile(path.join(repo, "package.json"), "{}");
+    await writeOpenCodePlanDb(path.join(dataRoot, "opencode.db"), repo);
+
+    const app = createApp({
+      roots: [path.join(root, "workspace")],
+      sources: [
+        {
+          name: "opencode-plan-sessions",
+          mode: "opencode-db",
+          roots: [dataRoot],
+          patterns: [],
+          inferRepoFromContent: true,
+          defaultCategory: "plan"
+        }
+      ]
+    });
+
+    const list = await request(app).get("/api/docs").expect(200);
+    expect(list.body.docs).toHaveLength(1);
+
+    const doc = list.body.docs[0];
+    const detail = await request(app).get(`/api/docs/${doc.id}`).expect(200);
+    expect(detail.body.doc.renderedHtml).toContain("<h2>Final Plan</h2>");
+
+    await request(app)
+      .get(`/raw/${doc.id}`)
+      .expect(200)
+      .expect("Content-Type", /text\/markdown/)
+      .expect((response) => {
+        expect(response.text).toContain("# Review import mutation");
+        expect(response.text).toContain("Use repository path");
+      });
+  });
 });
+
+async function writeOpenCodePlanDb(dbPath: string, repo: string): Promise<void> {
+  const SQL = await initSqlJs();
+  const db = new SQL.Database();
+  db.run(`
+    CREATE TABLE session (
+      id TEXT PRIMARY KEY,
+      directory TEXT NOT NULL,
+      title TEXT NOT NULL,
+      agent TEXT,
+      time_created INTEGER,
+      time_updated INTEGER
+    );
+    CREATE TABLE message (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      time_created INTEGER,
+      time_updated INTEGER,
+      data TEXT NOT NULL
+    );
+    CREATE TABLE part (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      time_created INTEGER,
+      time_updated INTEGER,
+      data TEXT NOT NULL
+    );
+  `);
+  db.run("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)", [
+    "ses_plan",
+    repo,
+    "Review import mutation",
+    "plan",
+    1_700_000_000_000,
+    1_700_000_100_000
+  ]);
+  db.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
+    "msg_assistant",
+    "ses_plan",
+    1_700_000_000_002,
+    1_700_000_100_000,
+    JSON.stringify({ role: "assistant", agent: "plan" })
+  ]);
+  db.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+    "prt_assistant",
+    "msg_assistant",
+    "ses_plan",
+    1_700_000_000_002,
+    1_700_000_100_000,
+    JSON.stringify({ type: "text", text: "## Final Plan\n\nUse repository path `" + repo + "`." })
+  ]);
+
+  await writeFile(dbPath, db.export());
+  db.close();
+}

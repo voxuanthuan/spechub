@@ -2,6 +2,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import initSqlJs from "sql.js";
 import { defaultConfig } from "../src/config.js";
 import { scanDocuments } from "../src/scanner.js";
 
@@ -15,7 +16,10 @@ describe("scanDocuments", () => {
     const alpha = path.join(root, "alpha");
     const beta = path.join(root, "groups", "beta");
     await mkdir(path.join(alpha, "docs", "superpowers", "plans"), { recursive: true });
+    await mkdir(path.join(alpha, "docs", "superpowers", "specs"), { recursive: true });
+    await mkdir(path.join(alpha, "docs", "supperpowers", "specs"), { recursive: true });
     await mkdir(path.join(alpha, "docs", "supperspowers", "specs"), { recursive: true });
+    await mkdir(path.join(alpha, ".opencode", "agents"), { recursive: true });
     await mkdir(path.join(alpha, "docs"), { recursive: true });
     await mkdir(path.join(alpha, "node_modules", "docs", "specs"), { recursive: true });
     await mkdir(path.join(beta, "specs"), { recursive: true });
@@ -23,7 +27,10 @@ describe("scanDocuments", () => {
 
     await writeFile(path.join(alpha, "package.json"), "{}");
     await writeFile(path.join(alpha, "docs", "superpowers", "plans", "roadmap.md"), "# Roadmap\n");
+    await writeFile(path.join(alpha, "docs", "superpowers", "specs", "connect-sync.md"), "# Connect Sync Design\n");
+    await writeFile(path.join(alpha, "docs", "supperpowers", "specs", "legacy-spelling.md"), "# Legacy Spelling Spec\n");
     await writeFile(path.join(alpha, "docs", "supperspowers", "specs", "typo.html"), "<h1>Typo Path</h1>");
+    await writeFile(path.join(alpha, ".opencode", "agents", "review.md"), "# OpenCode Review Agent\n");
     await writeFile(path.join(alpha, "docs", "global-search-refactor-changes.html"), "<h1>Global Search Refactor</h1>");
     await writeFile(path.join(alpha, "node_modules", "docs", "specs", "noise.md"), "# Noise\n");
     await writeFile(path.join(beta, "package.json"), "{}");
@@ -35,9 +42,12 @@ describe("scanDocuments", () => {
     const docs = await scanDocuments({ roots: [root] });
 
     expect(docs.map((doc) => doc.relativePath).sort()).toEqual([
+      ".opencode/agents/review.md",
       "docs/global-search-refactor-changes.html",
       "docs/plans/migration.md",
       "docs/superpowers/plans/roadmap.md",
+      "docs/superpowers/specs/connect-sync.md",
+      "docs/supperpowers/specs/legacy-spelling.md",
       "docs/supperspowers/specs/typo.html",
       "plan.md",
       "specs/api.html"
@@ -47,6 +57,22 @@ describe("scanDocuments", () => {
       kind: "markdown",
       title: "Roadmap",
       category: "plan"
+    });
+    expect(docs.find((doc) => doc.relativePath === "docs/superpowers/specs/connect-sync.md")).toMatchObject({
+      repoName: "alpha",
+      kind: "markdown",
+      title: "Connect Sync Design",
+      category: "spec"
+    });
+    expect(docs.find((doc) => doc.relativePath === "docs/supperpowers/specs/legacy-spelling.md")).toMatchObject({
+      repoName: "alpha",
+      title: "Legacy Spelling Spec",
+      category: "spec"
+    });
+    expect(docs.find((doc) => doc.relativePath === ".opencode/agents/review.md")).toMatchObject({
+      repoName: "alpha",
+      title: "OpenCode Review Agent",
+      category: "doc"
     });
     expect(docs.find((doc) => doc.relativePath === "specs/api.html")).toMatchObject({
       repoName: "beta",
@@ -167,6 +193,7 @@ describe("scanDocuments", () => {
     expect([...sourceByName.keys()]).toEqual([
       "repositories",
       "opencode",
+      "opencode-plan-sessions",
       "codex",
       "claude",
       "cursor",
@@ -175,8 +202,13 @@ describe("scanDocuments", () => {
     ]);
     expect(sourceByName.get("opencode")).toMatchObject({
       mode: "direct",
-      roots: [path.join(os.homedir(), ".opencode"), path.join(os.homedir(), ".local", "share", "opencode")],
+      roots: [
+        path.join(os.homedir(), ".opencode"),
+        path.join(os.homedir(), ".config", "opencode"),
+        path.join(os.homedir(), ".local", "share", "opencode")
+      ],
       patterns: [
+        "agents/**/*.{md,markdown,html}",
         "plans/**/*.{md,markdown,html}",
         "plan/**/*.{md,markdown,html}",
         "specs/**/*.{md,markdown,html}",
@@ -191,6 +223,7 @@ describe("scanDocuments", () => {
       mode: "direct",
       roots: [path.join(os.homedir(), ".claude")],
       patterns: [
+        "agents/**/*.{md,markdown,html}",
         "plans/**/*.{md,markdown,html}",
         "plan/**/*.{md,markdown,html}",
         "specs/**/*.{md,markdown,html}",
@@ -198,6 +231,13 @@ describe("scanDocuments", () => {
         "docs/**/*.{md,markdown,html}",
         "reports/**/*.{md,markdown,html}"
       ]
+    });
+    expect(sourceByName.get("opencode-plan-sessions")).toMatchObject({
+      mode: "opencode-db",
+      roots: [path.join(os.homedir(), ".local", "share", "opencode")],
+      patterns: [],
+      inferRepoFromContent: true,
+      defaultCategory: "plan"
     });
   });
 
@@ -209,6 +249,7 @@ describe("scanDocuments", () => {
     const codex = path.join(root, ".codex");
 
     await mkdir(path.join(opencodeConfig, "commands"), { recursive: true });
+    await mkdir(path.join(opencodeConfig, "agents"), { recursive: true });
     await mkdir(path.join(opencodeConfig, "node_modules", "@standard-schema", "spec"), { recursive: true });
     await mkdir(path.join(opencodeData, "plans"), { recursive: true });
     await mkdir(path.join(opencodeData, "storage", "session_diff"), { recursive: true });
@@ -219,6 +260,7 @@ describe("scanDocuments", () => {
     await mkdir(path.join(codex, "memories"), { recursive: true });
 
     await writeFile(path.join(opencodeConfig, "commands", "plan.md"), "# OpenCode Command\n");
+    await writeFile(path.join(opencodeConfig, "agents", "review.md"), "# OpenCode Review Agent\n");
     await writeFile(path.join(opencodeConfig, "node_modules", "@standard-schema", "spec", "README.md"), "# Package Spec\n");
     await writeFile(path.join(opencodeData, "plans", "checkout.md"), "# OpenCode Plan\n");
     await writeFile(path.join(opencodeData, "storage", "session_diff", "ses_123.json"), "{}");
@@ -249,12 +291,151 @@ describe("scanDocuments", () => {
     expect(docs.map((doc) => doc.title).sort()).toEqual([
       "Claude Plan",
       "Codex API Spec",
-      "OpenCode Plan"
+      "OpenCode Plan",
+      "OpenCode Review Agent"
     ]);
     expect(docs.map((doc) => doc.relativePath).sort()).toEqual([
+      "agents/review.md",
       "docs/specs/api.md",
       "plans/checkout.md",
       "plans/migration.md"
     ]);
   });
+
+  it("indexes OpenCode /plan sessions from SQLite storage", async () => {
+    const root = await fixtureRoot();
+    const dataRoot = path.join(root, ".local", "share", "opencode");
+    const workspace = path.join(root, "workspace");
+    const repo = path.join(workspace, "core-api");
+    await mkdir(dataRoot, { recursive: true });
+    await mkdir(repo, { recursive: true });
+    await writeFile(path.join(repo, "package.json"), "{}");
+    await writeOpenCodeDb(path.join(dataRoot, "opencode.db"), repo);
+
+    const docs = await scanDocuments({
+      roots: [workspace],
+      sources: [
+        {
+          name: "opencode-plan-sessions",
+          mode: "opencode-db",
+          roots: [dataRoot],
+          patterns: [],
+          inferRepoFromContent: true,
+          defaultCategory: "plan"
+        }
+      ]
+    });
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0]).toMatchObject({
+      title: "Review import mutation",
+      sourceTitle: "Review import mutation",
+      sourceName: "opencode-plan-sessions",
+      repoName: "core-api",
+      repoRoot: repo,
+      relativePath: "opencode-plan-sessions/ses_plan.md",
+      category: "plan",
+      kind: "markdown",
+      contentSource: {
+        type: "opencode-db",
+        dbPath: path.join(dataRoot, "opencode.db"),
+        sessionId: "ses_plan"
+      }
+    });
+    expect(docs[0].sizeBytes).toBeGreaterThan(0);
+  });
 });
+
+async function writeOpenCodeDb(dbPath: string, repo: string): Promise<void> {
+  const SQL = await initSqlJs();
+  const db = new SQL.Database();
+  db.run(`
+    CREATE TABLE session (
+      id TEXT PRIMARY KEY,
+      directory TEXT NOT NULL,
+      title TEXT NOT NULL,
+      agent TEXT,
+      time_created INTEGER,
+      time_updated INTEGER
+    );
+    CREATE TABLE message (
+      id TEXT PRIMARY KEY,
+      session_id TEXT NOT NULL,
+      time_created INTEGER,
+      time_updated INTEGER,
+      data TEXT NOT NULL
+    );
+    CREATE TABLE part (
+      id TEXT PRIMARY KEY,
+      message_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      time_created INTEGER,
+      time_updated INTEGER,
+      data TEXT NOT NULL
+    );
+  `);
+  db.run("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)", [
+    "ses_plan",
+    repo,
+    "Review import mutation",
+    "plan",
+    1_700_000_000_000,
+    1_700_000_100_000
+  ]);
+  db.run("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)", [
+    "ses_build",
+    repo,
+    "Build work",
+    "build",
+    1_700_000_000_000,
+    1_700_000_100_000
+  ]);
+  db.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
+    "msg_user",
+    "ses_plan",
+    1_700_000_000_001,
+    1_700_000_000_001,
+    JSON.stringify({ role: "user", agent: "plan" })
+  ]);
+  db.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
+    "msg_assistant",
+    "ses_plan",
+    1_700_000_000_002,
+    1_700_000_100_000,
+    JSON.stringify({ role: "assistant", agent: "plan" })
+  ]);
+  db.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
+    "msg_build",
+    "ses_build",
+    1_700_000_000_003,
+    1_700_000_100_000,
+    JSON.stringify({ role: "assistant", agent: "build" })
+  ]);
+  db.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+    "prt_user",
+    "msg_user",
+    "ses_plan",
+    1_700_000_000_001,
+    1_700_000_000_001,
+    JSON.stringify({ type: "text", text: "Plan the import mutation" })
+  ]);
+  db.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+    "prt_assistant",
+    "msg_assistant",
+    "ses_plan",
+    1_700_000_000_002,
+    1_700_000_100_000,
+    JSON.stringify({ type: "text", text: "## Final Plan\n\nUse repository path `" + repo + "` and update the GraphQL resolver." })
+  ]);
+  db.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+    "prt_build",
+    "msg_build",
+    "ses_build",
+    1_700_000_000_003,
+    1_700_000_100_000,
+    JSON.stringify({ type: "text", text: "Not a plan session" })
+  ]);
+
+  await writeFile(dbPath, db.export());
+  db.close();
+}

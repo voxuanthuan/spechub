@@ -3,6 +3,7 @@ import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import fg from "fast-glob";
 import { defaultConfig, normalizeOverridePath } from "./config.js";
+import { scanOpenCodePlanSource } from "./opencode.js";
 import type { DocumentCategory, DocumentKind, DocumentMeta, SpecHubConfig, SpecHubSource } from "./types.js";
 
 const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"]);
@@ -50,6 +51,10 @@ async function scanSource(
   titleOverrides: Record<string, string>,
   repoHints: RepoHint[]
 ): Promise<DocumentMeta[]> {
+  if (source.mode === "opencode-db") {
+    return scanOpenCodePlanSource(source, titleOverrides, repoHints);
+  }
+
   if (source.mode === "direct") {
     const docs = await Promise.all(
       source.roots.map((root) => scanDirectRoot(root, source, ignorePatterns, titleOverrides, repoHints))

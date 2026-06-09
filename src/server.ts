@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import express, { type Express, type Request, type Response } from "express";
 import { DEFAULT_CONFIG_PATH, resolveConfig, updateTitleOverride } from "./config.js";
 import { renderMarkdown } from "./markdown.js";
+import { readOpenCodePlanContent } from "./opencode.js";
 import { openLocalPath } from "./opener.js";
 import { scanDocuments } from "./scanner.js";
 import type { DocumentMeta, RuntimeSpecHubConfig, SpecHubConfig } from "./types.js";
@@ -48,7 +49,7 @@ export function createApp(config: RuntimeSpecHubConfig = {}): Express {
     };
 
     if (doc.kind === "markdown") {
-      const raw = await readFile(doc.absolutePath, "utf8");
+      const raw = await readDocumentContent(doc);
       response.json({
         doc: {
           ...detail,
@@ -69,7 +70,7 @@ export function createApp(config: RuntimeSpecHubConfig = {}): Express {
     }
 
     response.type(doc.kind === "html" ? "html" : "text/markdown");
-    response.send(await readFile(doc.absolutePath));
+    response.send(await readDocumentContent(doc));
   }));
 
   app.post("/api/docs/:id/open-source", asyncRoute(async (request, response) => {
@@ -78,7 +79,7 @@ export function createApp(config: RuntimeSpecHubConfig = {}): Express {
       notFound(response);
       return;
     }
-    await openLocalPath(doc.absolutePath);
+    await openLocalPath(sourcePath(doc));
     response.json({ ok: true });
   }));
 
@@ -101,7 +102,7 @@ export function createApp(config: RuntimeSpecHubConfig = {}): Express {
       notFound(response);
       return;
     }
-    await openLocalPath(path.dirname(doc.absolutePath));
+    await openLocalPath(path.dirname(sourcePath(doc)));
     response.json({ ok: true });
   }));
 
@@ -156,6 +157,23 @@ async function currentConfig(config: RuntimeSpecHubConfig): Promise<Partial<Spec
 async function findDocument(config: Partial<SpecHubConfig>, id: string): Promise<DocumentMeta | undefined> {
   const docs = await scanDocuments(config);
   return docs.find((doc) => doc.id === id);
+}
+
+async function readDocumentContent(doc: DocumentMeta): Promise<string> {
+  if (!doc.contentSource || doc.contentSource.type === "file") {
+    return readFile(doc.absolutePath, "utf8");
+  }
+
+  if (doc.contentSource.type === "opencode-db") {
+    return readOpenCodePlanContent(doc.contentSource.dbPath, doc.contentSource.sessionId);
+  }
+
+  return readFile(doc.absolutePath, "utf8");
+}
+
+function sourcePath(doc: DocumentMeta): string {
+  if (doc.contentSource?.type === "opencode-db") return doc.contentSource.dbPath;
+  return doc.absolutePath;
 }
 
 function summarizeRepos(docs: DocumentMeta[]) {

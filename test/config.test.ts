@@ -25,11 +25,17 @@ describe("resolveConfig", () => {
     expect(config.sources.map((source) => source.name)).toEqual([
       "repositories",
       "opencode",
+      "opencode-plan-sessions",
       "codex",
       "claude",
       "cursor",
       "augment",
       "windsurf"
     ]);
+    expect(config.sources[0].patterns).toEqual(expect.arrayContaining([
+      "docs/**/*.md",
+      "docs/superpowers/specs/**/*.{md,markdown,html}",
+      "docs/supperpowers/specs/**/*.{md,markdown,html}"
+    ]));
   });
 });
