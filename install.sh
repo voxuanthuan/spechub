@@ -73,8 +73,17 @@ pnpm install --frozen-lockfile
 log "Building SpecHub..."
 pnpm build
 
-log "Linking spechub command..."
-pnpm link --global
+SPECHUB_BIN_DIR="${SPECHUB_BIN_DIR:-$HOME/.local/bin}"
+SPECHUB_ENTRY="$SPECHUB_DIR/dist/src/cli.js"
+
+if ! test -f "$SPECHUB_ENTRY"; then
+  fail "build did not produce $SPECHUB_ENTRY"
+fi
+
+log "Installing spechub command to $SPECHUB_BIN_DIR/spechub..."
+mkdir -p "$SPECHUB_BIN_DIR"
+chmod +x "$SPECHUB_ENTRY"
+ln -sf "$SPECHUB_ENTRY" "$SPECHUB_BIN_DIR/spechub"
 
 if command -v spechub >/dev/null 2>&1; then
   log "SpecHub installed."
@@ -82,5 +91,9 @@ if command -v spechub >/dev/null 2>&1; then
   exit 0
 fi
 
-PNPM_HOME="$(pnpm bin --global 2>/dev/null || true)"
-fail "spechub was linked, but it is not on PATH. Add pnpm's global bin directory to PATH and rerun your shell. pnpm global bin: ${PNPM_HOME:-unknown}"
+log "SpecHub installed to $SPECHUB_BIN_DIR/spechub."
+log "Add this line to your shell config (~/.zshrc or ~/.bashrc) and reopen the terminal:"
+log ""
+log "  export PATH=\"$SPECHUB_BIN_DIR:\$PATH\""
+log ""
+log "Then run: spechub --open"

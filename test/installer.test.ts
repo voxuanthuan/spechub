@@ -22,7 +22,9 @@ describe("installer", () => {
     expect(script).toContain("SPECHUB_BRANCH");
     expect(script).toContain("pnpm install --frozen-lockfile");
     expect(script).toContain("pnpm build");
-    expect(script).toContain("pnpm link --global");
+    expect(script).toContain("SPECHUB_BIN_DIR");
+    expect(script).toContain("ln -sf");
+    expect(script).toContain("dist/src/cli.js");
     expect(script).toContain("spechub --open");
   });
 

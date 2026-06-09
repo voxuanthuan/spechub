@@ -203,15 +203,11 @@ Install from a cloned checkout:
 ```sh
 pnpm install
 pnpm build
-pnpm link --global
+./install.sh
 spechub --open
 ```
 
-You can also run the installer from the checkout:
-
-```sh
-./install.sh
-```
+`./install.sh` symlinks the built CLI into `$HOME/.local/bin/spechub` (override with `SPECHUB_BIN_DIR`). If that directory is not on your `PATH`, the script prints the line to add to your shell config.
 
 Run the browser dashboard during development (Express API + the exported Next.js UI, which is what `spechub --open` ships):
 

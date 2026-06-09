@@ -68,12 +68,21 @@ The installer runs:
 ```sh
 pnpm install --frozen-lockfile
 pnpm build
-pnpm link --global
 ```
 
-`pnpm build` already runs the web export and server TypeScript build. The existing `bin` mapping points `spechub` at `./dist/src/cli.js`, so global linking exposes the intended command without duplicating wrapper logic.
+`pnpm build` already runs the web export and server TypeScript build, producing `dist/src/cli.js`. The existing `bin` mapping in `package.json` points `spechub` at that entry.
 
-After linking, the script verifies that `spechub` is available on `PATH`. If it is not, it prints the pnpm global bin directory and tells the user to add it to `PATH`.
+After building, the installer creates a symlink to the built CLI in a user-controlled bin directory (defaulting to `$HOME/.local/bin/spechub`, overridable with `SPECHUB_BIN_DIR`):
+
+```sh
+mkdir -p "$SPECHUB_BIN_DIR"
+chmod +x "$SPECHUB_DIR/dist/src/cli.js"
+ln -sf "$SPECHUB_DIR/dist/src/cli.js" "$SPECHUB_BIN_DIR/spechub"
+```
+
+The installer intentionally does not use `pnpm link --global`. That command depends on pnpm's global bin directory, which requires a one-time `pnpm setup` (or a `PNPM_HOME` environment variable) that is not configured by default on macOS Homebrew or Corepack installs, producing `ERR_PNPM_NO_GLOBAL_BIN_DIR`. The self-managed symlink works on any platform regardless of how pnpm was installed.
+
+After linking, the script verifies that `spechub` is on `PATH`. If it is, the install is complete. If not, the script prints the exact `export PATH=...` line the user should add to `~/.zshrc` or `~/.bashrc`.
 
 ## README Changes
 
@@ -85,7 +94,8 @@ Update Quick Start to use the remote installer and `spechub --open`. Move clone/
 - Git clone/update failures stop the install.
 - Build failures stop the install and keep the checkout for debugging.
 - Existing `~/.spechub` checkouts are updated with `git fetch`, `git checkout`, and `git pull --ff-only`.
-- If the global link succeeds but `spechub` is not on `PATH`, installation is considered incomplete and the script explains how to fix shell configuration.
+- If `pnpm build` does not produce `dist/src/cli.js`, the script fails before attempting to symlink.
+- If the symlink succeeds but `$SPECHUB_BIN_DIR` is not on `PATH`, the script prints the exact `export PATH=...` line to add to the user's shell config and exits successfully (install is considered complete; only PATH wiring is left).
 
 ## Testing
 
