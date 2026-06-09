@@ -155,16 +155,20 @@ function normalizeSources(
   ];
 }
 
-export async function loadConfig(configPath = DEFAULT_CONFIG_PATH): Promise<Partial<SpecHubConfig>> {
+export async function readConfigFile(configPath: string): Promise<Partial<SpecHubConfig>> {
   const resolvedPath = expandHome(configPath);
   try {
     await access(resolvedPath);
   } catch {
     return {};
   }
-
   const raw = await readFile(resolvedPath, "utf8");
-  const parsed = JSON.parse(raw) as Partial<SpecHubConfig>;
+  return JSON.parse(raw) as Partial<SpecHubConfig>;
+}
+
+export async function loadConfig(configPath = DEFAULT_CONFIG_PATH): Promise<Partial<SpecHubConfig>> {
+  const parsed = await readConfigFile(configPath);
+  if (!Object.keys(parsed).length) return {};
   return {
     roots: parsed.roots?.map(expandHome),
     ignorePatterns: parsed.ignorePatterns,
@@ -174,29 +178,64 @@ export async function loadConfig(configPath = DEFAULT_CONFIG_PATH): Promise<Part
   };
 }
 
-export async function updateTitleOverride(configPath: string, absolutePath: string, title: string): Promise<void> {
+export function normalizeRoots(roots: readonly string[]): string[] {
+  const seen = new Set<string>();
+  const result: string[] = [];
+  for (const raw of roots) {
+    if (typeof raw !== "string") continue;
+    const trimmed = raw.trim();
+    if (!trimmed) continue;
+    const key = expandHome(trimmed);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(trimmed);
+  }
+  return result;
+}
+
+async function mutateConfigFile(
+  configPath: string,
+  mutator: (existing: Partial<SpecHubConfig>) => Partial<SpecHubConfig>
+): Promise<Partial<SpecHubConfig>> {
   const resolvedPath = expandHome(configPath);
-  let existing: Partial<SpecHubConfig> = {};
-  try {
-    existing = JSON.parse(await readFile(resolvedPath, "utf8")) as Partial<SpecHubConfig>;
-  } catch {
-    existing = {};
-  }
-
-  const titleOverrides = normalizeTitleOverrides(existing.titleOverrides);
-  const key = normalizeOverridePath(absolutePath);
-  const trimmed = title.trim();
-
-  if (trimmed) {
-    titleOverrides[key] = trimmed;
-  } else {
-    delete titleOverrides[key];
-  }
-
+  const existing = await readConfigFile(configPath);
+  const next = mutator(existing);
   await mkdir(path.dirname(resolvedPath), { recursive: true });
   const tempPath = `${resolvedPath}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify({ ...existing, titleOverrides }, null, 2)}\n`, "utf8");
+  await writeFile(tempPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
   await rename(tempPath, resolvedPath);
+  return next;
+}
+
+export async function updateTitleOverride(configPath: string, absolutePath: string, title: string): Promise<void> {
+  await mutateConfigFile(configPath, (existing) => {
+    const titleOverrides = normalizeTitleOverrides(existing.titleOverrides);
+    const key = normalizeOverridePath(absolutePath);
+    const trimmed = title.trim();
+    if (trimmed) {
+      titleOverrides[key] = trimmed;
+    } else {
+      delete titleOverrides[key];
+    }
+    return { ...existing, titleOverrides };
+  });
+}
+
+export async function updateRoots(configPath: string, roots: readonly string[]): Promise<string[]> {
+  const normalized = normalizeRoots(roots);
+  if (normalized.length === 0) {
+    throw new Error("At least one workspace root is required.");
+  }
+  await mutateConfigFile(configPath, (existing) => {
+    const next: Partial<SpecHubConfig> = { ...existing, roots: normalized };
+    if (existing.sources?.length) {
+      next.sources = existing.sources.map((source) =>
+        source.mode === "repositories" ? { ...source, roots: normalized } : source
+      );
+    }
+    return next;
+  });
+  return normalized;
 }
 
 export async function resolveConfig(options: {

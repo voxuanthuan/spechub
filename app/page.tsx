@@ -22,6 +22,25 @@ type Density = "compact" | "regular" | "comfy";
 type ActiveView = "documents" | "prompts";
 type RepoSummary = { name: string; count: number };
 
+interface ConfigRoot {
+  path: string;
+  expandedPath: string;
+  exists: boolean;
+}
+
+interface ConfigInfo {
+  configPath: string;
+  roots: ConfigRoot[];
+  explicitRoots: boolean;
+  warnings: string[];
+}
+
+interface DraftRoot {
+  id: string;
+  path: string;
+  initial: ConfigRoot | null;
+}
+
 interface DocumentMeta {
   id: string;
   title: string;
@@ -126,6 +145,13 @@ export default function Home() {
   const [promptTag, setPromptTag] = useState<PromptTagFilter>("all");
   const [selectedPromptId, setSelectedPromptId] = useState(promptCards[0]?.id ?? "");
   const [promptCopyState, setPromptCopyState] = useState(false);
+  const [isTauri, setIsTauri] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsInfo, setSettingsInfo] = useState<ConfigInfo | null>(null);
+  const [draftRoots, setDraftRoots] = useState<DraftRoot[]>([]);
+  const [addRootDraft, setAddRootDraft] = useState("");
+  const [settingsSaving, setSettingsSaving] = useState(false);
+  const [settingsError, setSettingsError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -134,6 +160,7 @@ export default function Home() {
     setDark(window.localStorage.getItem("spechub:theme") === "dark");
     setAccent(readStoredAccent());
     setDensity(readStoredDensity());
+    setIsTauri(isDesktop());
     void loadDocs();
   }, []);
 
@@ -177,6 +204,10 @@ export default function Home() {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       const isTyping = target && ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName);
+      if (event.key === "Escape" && settingsOpen) {
+        setSettingsOpen(false);
+        return;
+      }
       if (event.key === "Escape" && fullView) {
         setFullView(false);
         return;
@@ -194,14 +225,14 @@ export default function Home() {
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [activeView, fullView, selectedDoc]);
+  }, [activeView, fullView, selectedDoc, settingsOpen]);
 
   useEffect(() => {
-    document.body.style.overflow = fullView ? "hidden" : "";
+    document.body.style.overflow = fullView || settingsOpen ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
     };
-  }, [fullView]);
+  }, [fullView, settingsOpen]);
 
   const repos = useMemo(() => summarizeRepos(docs), [docs]);
   const hiddenRepoSet = useMemo(() => new Set(hiddenRepos), [hiddenRepos]);
@@ -333,6 +364,74 @@ export default function Home() {
     setRepo(name);
   }
 
+  async function openSettings() {
+    setSettingsError(null);
+    setAddRootDraft("");
+    setSettingsOpen(true);
+    try {
+      const response = await fetch("/api/config");
+      if (!response.ok) throw new Error("Unable to load settings.");
+      const info = (await response.json()) as ConfigInfo;
+      setSettingsInfo(info);
+      setDraftRoots(info.roots.map(toDraftRoot));
+    } catch (reason) {
+      setSettingsInfo(null);
+      setDraftRoots([]);
+      setSettingsError(reason instanceof Error ? reason.message : "Unable to load settings.");
+    }
+  }
+
+  function closeSettings() {
+    if (settingsSaving) return;
+    setSettingsOpen(false);
+    setSettingsError(null);
+  }
+
+  function updateDraftRoot(id: string, value: string) {
+    setDraftRoots((current) => current.map((entry) => (entry.id === id ? { ...entry, path: value } : entry)));
+  }
+
+  function removeDraftRoot(id: string) {
+    setDraftRoots((current) => current.filter((entry) => entry.id !== id));
+  }
+
+  function addDraftRoot() {
+    const trimmed = addRootDraft.trim();
+    if (!trimmed) return;
+    setDraftRoots((current) => [...current, { id: createDraftId(), path: trimmed, initial: null }]);
+    setAddRootDraft("");
+  }
+
+  async function saveSettings() {
+    const candidate = draftRoots.map((entry) => entry.path.trim()).filter((entry) => entry.length > 0);
+    if (candidate.length === 0) {
+      setSettingsError("Add at least one workspace root before saving.");
+      return;
+    }
+    setSettingsError(null);
+    setSettingsSaving(true);
+    try {
+      const response = await fetch("/api/config/roots", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ roots: candidate })
+      });
+      if (!response.ok) {
+        const payload = (await response.json().catch(() => ({}))) as { error?: string };
+        throw new Error(payload.error ?? "Unable to save workspace roots.");
+      }
+      const info = (await response.json()) as ConfigInfo;
+      setSettingsInfo(info);
+      setDraftRoots(info.roots.map(toDraftRoot));
+      setSettingsOpen(false);
+      await loadDocs();
+    } catch (reason) {
+      setSettingsError(reason instanceof Error ? reason.message : "Unable to save workspace roots.");
+    } finally {
+      setSettingsSaving(false);
+    }
+  }
+
   const rawHref = useMemo(() => {
     if (!selectedDoc) return "#";
     if (selectedDoc.rawUrl) return selectedDoc.rawUrl;
@@ -359,6 +458,17 @@ export default function Home() {
               <b>SpecHub</b>
               <span>Local docs index</span>
             </div>
+            {isTauri ? null : (
+              <button
+                className="settings-btn"
+                type="button"
+                title="Workspace settings"
+                aria-label="Open workspace settings"
+                onClick={() => void openSettings()}
+              >
+                <SettingsIcon />
+              </button>
+            )}
             <button
               className="collapse-btn"
               type="button"
@@ -727,6 +837,104 @@ export default function Home() {
           <div className="modal-body">{fullView ? renderPreview(selectedDoc) : null}</div>
         </div>
       </div>
+
+      <div className="modal-backdrop" data-open={settingsOpen} onClick={(event) => event.target === event.currentTarget && closeSettings()}>
+        <div className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Workspace settings">
+          <div className="modal-bar">
+            <div className="mb-title">
+              <b>Workspace settings</b>
+              <span>{settingsInfo?.configPath ?? "Loading config..."}</span>
+            </div>
+            <div className="mb-actions">
+              <kbd>Esc</kbd>
+              <button
+                className="modal-close"
+                type="button"
+                title="Close"
+                aria-label="Close settings"
+                disabled={settingsSaving}
+                onClick={closeSettings}
+              >
+                <CloseIcon />
+              </button>
+            </div>
+          </div>
+          <div className="settings-body">
+            {settingsInfo?.warnings?.map((warning) => (
+              <div key={warning} className="settings-warning">{warning}</div>
+            ))}
+
+            <div className="settings-section">
+              <h3>Workspace roots</h3>
+              {draftRoots.length === 0 ? (
+                <p className="settings-hint">No workspace roots yet. Add at least one folder below.</p>
+              ) : (
+                <ul className="roots-list">
+                  {draftRoots.map((entry) => {
+                    const status = rootDisplayStatus(entry);
+                    return (
+                      <li className="root-row" key={entry.id}>
+                        <input
+                          type="text"
+                          aria-label="Workspace root path"
+                          spellCheck={false}
+                          value={entry.path}
+                          placeholder="/path/to/workspace"
+                          onChange={(event) => updateDraftRoot(entry.id, event.target.value)}
+                        />
+                        <span className="root-status" data-state={status.state}>{status.label}</span>
+                        <button
+                          type="button"
+                          className="root-remove"
+                          title="Remove root"
+                          aria-label={`Remove ${entry.path || "workspace root"}`}
+                          onClick={() => removeDraftRoot(entry.id)}
+                        >
+                          <TrashIcon />
+                        </button>
+                      </li>
+                    );
+                  })}
+                </ul>
+              )}
+            </div>
+
+            <div className="settings-section">
+              <h3>Add workspace</h3>
+              <form
+                className="add-root"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  addDraftRoot();
+                }}
+              >
+                <input
+                  type="text"
+                  aria-label="New workspace root"
+                  spellCheck={false}
+                  value={addRootDraft}
+                  placeholder="~/work or /absolute/path"
+                  onChange={(event) => setAddRootDraft(event.target.value)}
+                />
+                <button className="btn" type="submit" disabled={!addRootDraft.trim()}>
+                  <PlusIcon />
+                  Add
+                </button>
+              </form>
+              <p className="settings-hint">Tip: use ~ to reference your home directory. Restart spechub if you ran it with --roots.</p>
+            </div>
+
+            {settingsError ? <div className="settings-error">{settingsError}</div> : null}
+
+            <div className="settings-actions">
+              <button className="btn" type="button" disabled={settingsSaving} onClick={closeSettings}>Cancel</button>
+              <button className="btn primary" type="button" disabled={settingsSaving} onClick={() => void saveSettings()}>
+                {settingsSaving ? "Saving..." : "Save changes"}
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
     </>
   );
 }
@@ -915,6 +1123,27 @@ function normalizeRepoNames(names: unknown[]) {
     .sort((left, right) => left.localeCompare(right));
 }
 
+function toDraftRoot(root: ConfigRoot): DraftRoot {
+  return { id: createDraftId(), path: root.path, initial: root };
+}
+
+function createDraftId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `draft-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
+}
+
+function rootDisplayStatus(entry: DraftRoot): { state: "ok" | "missing" | "new"; label: string } {
+  const trimmed = entry.path.trim();
+  if (!entry.initial || trimmed !== entry.initial.path.trim()) {
+    return { state: "new", label: "Unsaved" };
+  }
+  return entry.initial.exists
+    ? { state: "ok", label: "Found" }
+    : { state: "missing", label: "Missing" };
+}
+
 function SearchIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>;
 }
@@ -961,4 +1190,16 @@ function FullscreenIcon() {
 
 function CloseIcon() {
   return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>;
+}
+
+function SettingsIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.13.34.2.7.2 1.06a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" /></svg>;
+}
+
+function PlusIcon() {
+  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>;
+}
+
+function TrashIcon() {
+  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="m19 6-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>;
 }

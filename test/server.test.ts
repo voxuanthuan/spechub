@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import initSqlJs from "sql.js";
@@ -108,6 +108,101 @@ describe("server routes", () => {
         expect(response.text).toContain("# Review import mutation");
         expect(response.text).toContain("Use repository path");
       });
+  });
+
+  it("returns workspace settings with existence flags and overrides warning", async () => {
+    const root = await fixtureRoot();
+    const missing = path.join(root, "does-not-exist");
+    const configPath = path.join(root, "spechub-config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({ roots: [path.join(root, "repo"), missing] }, null, 2)
+    );
+
+    const app = createApp({ configPath });
+    const response = await request(app).get("/api/config").expect(200);
+    expect(response.body.configPath).toBe(configPath);
+    expect(response.body.explicitRoots).toBe(false);
+    expect(response.body.warnings).toEqual([]);
+    expect(response.body.roots).toEqual([
+      { path: path.join(root, "repo"), expandedPath: path.join(root, "repo"), exists: true },
+      { path: missing, expandedPath: missing, exists: false }
+    ]);
+
+    const overridden = createApp({
+      configPath,
+      roots: [path.join(root, "repo")],
+      explicitRoots: true
+    });
+    const overrideResponse = await request(overridden).get("/api/config").expect(200);
+    expect(overrideResponse.body.explicitRoots).toBe(true);
+    expect(overrideResponse.body.warnings).toHaveLength(1);
+    expect(overrideResponse.body.warnings[0]).toMatch(/--roots/);
+  });
+
+  it("persists workspace roots via PATCH and reflects them in /api/docs", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-server-roots-"));
+    const repoA = path.join(root, "repo-a");
+    const repoB = path.join(root, "repo-b");
+    await mkdir(path.join(repoA, "docs", "specs"), { recursive: true });
+    await mkdir(path.join(repoB, "docs", "specs"), { recursive: true });
+    await writeFile(path.join(repoA, "package.json"), "{}");
+    await writeFile(path.join(repoB, "package.json"), "{}");
+    await writeFile(path.join(repoA, "docs", "specs", "a.md"), "# A\n");
+    await writeFile(path.join(repoB, "docs", "specs", "b.md"), "# B\n");
+
+    const configPath = path.join(root, "config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        roots: [repoA],
+        sources: [
+          { name: "repositories", mode: "repositories", roots: [repoA], patterns: ["docs/**/*.md"] }
+        ]
+      })
+    );
+    const app = createApp({ configPath });
+
+    const first = await request(app).get("/api/docs").expect(200);
+    const firstPaths = (first.body.docs as Array<{ relativePath: string }>).map((doc) => doc.relativePath);
+    expect(firstPaths).toContain("docs/specs/a.md");
+    expect(firstPaths).not.toContain("docs/specs/b.md");
+
+    const patched = await request(app)
+      .patch("/api/config/roots")
+      .send({ roots: [repoB] })
+      .expect(200);
+    expect(patched.body.roots).toEqual([
+      { path: repoB, expandedPath: repoB, exists: true }
+    ]);
+
+    const after = await request(app).get("/api/docs").expect(200);
+    const afterPaths = (after.body.docs as Array<{ relativePath: string }>).map((doc) => doc.relativePath);
+    expect(afterPaths).toContain("docs/specs/b.md");
+    expect(afterPaths).not.toContain("docs/specs/a.md");
+
+    const onDisk = JSON.parse(await readFile(configPath, "utf8")) as {
+      roots: string[];
+      sources: Array<{ name: string; roots: string[] }>;
+    };
+    expect(onDisk.roots).toEqual([repoB]);
+    expect(onDisk.sources[0]).toMatchObject({ name: "repositories", roots: [repoB] });
+  });
+
+  it("rejects invalid roots payloads with 400", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-server-roots-invalid-"));
+    const configPath = path.join(root, "config.json");
+    const app = createApp({ configPath });
+
+    await request(app)
+      .patch("/api/config/roots")
+      .send({ roots: "nope" })
+      .expect(400);
+
+    await request(app)
+      .patch("/api/config/roots")
+      .send({ roots: ["   ", ""] })
+      .expect(400);
   });
 });
 

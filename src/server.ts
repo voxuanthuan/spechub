@@ -1,9 +1,16 @@
-import { access, readFile } from "node:fs/promises";
+import { access, readFile, stat } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express, { type Express, type Request, type Response } from "express";
-import { DEFAULT_CONFIG_PATH, resolveConfig, updateTitleOverride } from "./config.js";
+import {
+  DEFAULT_CONFIG_PATH,
+  expandHome,
+  readConfigFile,
+  resolveConfig,
+  updateRoots,
+  updateTitleOverride
+} from "./config.js";
 import { renderMarkdown } from "./markdown.js";
 import { readOpenCodePlanContent } from "./opencode.js";
 import { openLocalPath } from "./opener.js";
@@ -96,6 +103,25 @@ export function createApp(config: RuntimeSpecHubConfig = {}): Express {
     response.json({ doc: updated ?? doc });
   }));
 
+  app.get("/api/config", asyncRoute(async (_request, response) => {
+    response.json(await describeConfig(config));
+  }));
+
+  app.patch("/api/config/roots", asyncRoute(async (request, response) => {
+    const candidate = request.body?.roots;
+    if (!Array.isArray(candidate) || !candidate.every((entry: unknown) => typeof entry === "string")) {
+      response.status(400).json({ error: "roots must be an array of strings." });
+      return;
+    }
+    try {
+      await updateRoots(config.configPath ?? DEFAULT_CONFIG_PATH, candidate);
+    } catch (error) {
+      response.status(400).json({ error: error instanceof Error ? error.message : "Invalid roots." });
+      return;
+    }
+    response.json(await describeConfig(config));
+  }));
+
   app.post("/api/docs/:id/open-folder", asyncRoute(async (request, response) => {
     const doc = await findDocument(await currentConfig(config), request.params.id);
     if (!doc) {
@@ -152,6 +178,36 @@ async function currentConfig(config: RuntimeSpecHubConfig): Promise<Partial<Spec
     });
   }
   return config;
+}
+
+async function describeConfig(config: RuntimeSpecHubConfig): Promise<{
+  configPath: string;
+  roots: Array<{ path: string; expandedPath: string; exists: boolean }>;
+  explicitRoots: boolean;
+  warnings: string[];
+}> {
+  const configPath = config.configPath ?? DEFAULT_CONFIG_PATH;
+  const stored = await readConfigFile(configPath);
+  const explicitRoots = config.explicitRoots === true;
+  const sourceRoots = stored.roots ?? (config.roots ?? []);
+  const roots = await Promise.all(
+    sourceRoots.map(async (raw) => {
+      const expanded = expandHome(raw);
+      let exists = false;
+      try {
+        const info = await stat(expanded);
+        exists = info.isDirectory();
+      } catch {
+        exists = false;
+      }
+      return { path: raw, expandedPath: expanded, exists };
+    })
+  );
+  const warnings: string[] = [];
+  if (explicitRoots) {
+    warnings.push("Server was started with --roots; saved roots take effect on next launch.");
+  }
+  return { configPath, roots, explicitRoots, warnings };
 }
 
 async function findDocument(config: Partial<SpecHubConfig>, id: string): Promise<DocumentMeta | undefined> {
