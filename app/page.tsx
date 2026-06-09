@@ -3,6 +3,15 @@
 import DOMPurify from "dompurify";
 import { marked } from "marked";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  filterPromptCards,
+  promptCards,
+  promptTags,
+  summarizePromptCategories,
+  type PromptCard,
+  type PromptCategoryFilter,
+  type PromptTagFilter
+} from "./prompts.js";
 
 type DocumentKind = "markdown" | "html";
 type DocumentCategory = "plan" | "spec" | "superpowers" | "doc";
@@ -10,6 +19,7 @@ type CategoryFilter = DocumentCategory | "all";
 type DateFilter = "all" | "7" | "30" | "90";
 type Accent = "Green" | "Blue" | "Violet" | "Amber";
 type Density = "compact" | "regular" | "comfy";
+type ActiveView = "documents" | "prompts";
 type RepoSummary = { name: string; count: number };
 
 interface DocumentMeta {
@@ -90,11 +100,13 @@ const accents: Record<Accent, AccentTokens> = {
 };
 
 export default function Home() {
+  const [activeView, setActiveView] = useState<ActiveView>("documents");
   const [docs, setDocs] = useState<DocumentMeta[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<DocumentDetail | null>(null);
   const [repo, setRepo] = useState("all");
   const [hiddenRepos, setHiddenRepos] = useState<string[]>(() => readStoredHiddenRepos());
+  const [hiddenReposExpanded, setHiddenReposExpanded] = useState(false);
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<CategoryFilter>("all");
   const [date, setDate] = useState<DateFilter>("all");
@@ -109,9 +121,15 @@ export default function Home() {
   const [accent, setAccent] = useState<Accent>("Green");
   const [density, setDensity] = useState<Density>("regular");
   const [fullView, setFullView] = useState(false);
+  const [promptCategory, setPromptCategory] = useState<PromptCategoryFilter>("all");
+  const [promptQuery, setPromptQuery] = useState("");
+  const [promptTag, setPromptTag] = useState<PromptTagFilter>("all");
+  const [selectedPromptId, setSelectedPromptId] = useState(promptCards[0]?.id ?? "");
+  const [promptCopyState, setPromptCopyState] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    setActiveView(readStoredView());
     setSidebarCollapsed(window.localStorage.getItem("spechub:sidebar-collapsed") === "true");
     setDark(window.localStorage.getItem("spechub:theme") === "dark");
     setAccent(readStoredAccent());
@@ -122,6 +140,10 @@ export default function Home() {
   useEffect(() => {
     window.localStorage.setItem("spechub:hidden-repos", JSON.stringify(hiddenRepos));
   }, [hiddenRepos]);
+
+  useEffect(() => {
+    window.localStorage.setItem("spechub:view", activeView);
+  }, [activeView]);
 
   useEffect(() => {
     const root = document.documentElement;
@@ -164,7 +186,7 @@ export default function Home() {
         event.preventDefault();
         searchRef.current?.focus();
       }
-      if ((event.key === "f" || event.key === "F") && selectedDoc) {
+      if ((event.key === "f" || event.key === "F") && activeView === "documents" && selectedDoc) {
         event.preventDefault();
         setFullView(true);
       }
@@ -172,7 +194,7 @@ export default function Home() {
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [fullView, selectedDoc]);
+  }, [activeView, fullView, selectedDoc]);
 
   useEffect(() => {
     document.body.style.overflow = fullView ? "hidden" : "";
@@ -190,6 +212,21 @@ export default function Home() {
     () => filterDocs(docs, { repo, query, category, date, path, hiddenRepos }),
     [category, date, docs, hiddenRepos, path, query, repo]
   );
+  const promptCategorySummaries = useMemo(() => summarizePromptCategories(promptCards), []);
+  const filteredPrompts = useMemo(
+    () => filterPromptCards(promptCards, { category: promptCategory, query: promptQuery, tag: promptTag }),
+    [promptCategory, promptQuery, promptTag]
+  );
+  const selectedPrompt = useMemo(
+    () => promptCards.find((card) => card.id === selectedPromptId) ?? filteredPrompts[0] ?? promptCards[0],
+    [filteredPrompts, selectedPromptId]
+  );
+
+  useEffect(() => {
+    if (!filteredPrompts.some((card) => card.id === selectedPromptId)) {
+      setSelectedPromptId(filteredPrompts[0]?.id ?? promptCards[0]?.id ?? "");
+    }
+  }, [filteredPrompts, selectedPromptId]);
 
   useEffect(() => {
     if (repo !== "all" && hiddenRepoSet.has(repo)) {
@@ -235,6 +272,13 @@ export default function Home() {
     await navigator.clipboard.writeText(selectedDoc.absolutePath);
     setCopyState("Copied");
     window.setTimeout(() => setCopyState("Copy path"), 1000);
+  }
+
+  async function copyPromptSource() {
+    if (!selectedPrompt) return;
+    await navigator.clipboard.writeText(selectedPrompt.sourceUrl);
+    setPromptCopyState(true);
+    window.setTimeout(() => setPromptCopyState(false), 1000);
   }
 
   async function openSelected(action: "open_document_source" | "open_document_folder", httpAction: "open-source" | "open-folder") {
@@ -300,6 +344,10 @@ export default function Home() {
   const renderedPreview = useMemo(() => renderPreview(selectedDoc), [selectedDoc]);
   const selectedRepo = selectedDoc?.repoName ?? "No repo";
   const selectedCategory = selectedDoc?.category ?? "document";
+  const activeSearch = activeView === "documents" ? query : promptQuery;
+  const activeSearchPlaceholder = activeView === "documents"
+    ? "Search title, repo, path, or type..."
+    : "Search prompt pages, tags, or source URLs...";
 
   return (
     <>
@@ -327,93 +375,158 @@ export default function Home() {
             </button>
           </div>
 
-          <nav className="repo-scroll" aria-label="Repository filters">
-            <div className="section-label">Repositories</div>
-            <button className="repo" type="button" aria-selected={repo === "all"} onClick={() => setRepo("all")}>
-              <span className="dot" />
-              <span className="name">All repos</span>
-              <span className="count">{visibleDocCount}</span>
+          <div className="view-tabs" role="tablist" aria-label="SpecHub views">
+            <button type="button" role="tab" data-short="Docs" aria-selected={activeView === "documents"} onClick={() => setActiveView("documents")}>
+              Documents
             </button>
-            {visibleRepos.map((item) => (
-              <RepoFilterRow
-                item={item}
-                key={item.name}
-                selected={repo === item.name}
-                onSelect={() => setRepo(item.name)}
-                onToggle={() => hideRepo(item.name)}
-                toggleLabel={`Hide ${item.name}`}
-                toggleTitle="Hide repository"
-                icon={<EyeOffIcon />}
-              />
-            ))}
-            {hiddenRepoSummaries.length > 0 ? (
-              <>
-                <div className="hidden-repos-head">
-                  <span>Hidden</span>
-                  <b>{hiddenRepoSummaries.length}</b>
+            <button type="button" role="tab" data-short="Ask" aria-selected={activeView === "prompts"} onClick={() => setActiveView("prompts")}>
+              Prompts
+            </button>
+          </div>
+
+          {activeView === "documents" ? (
+            <nav className="repo-scroll" aria-label="Repository filters">
+              <div className="section-label">Repositories</div>
+              <button className="repo" type="button" aria-selected={repo === "all"} onClick={() => setRepo("all")}>
+                <span className="dot" />
+                <span className="name">All repos</span>
+                <span className="count">{visibleDocCount}</span>
+              </button>
+              {visibleRepos.map((item) => (
+                <RepoFilterRow
+                  item={item}
+                  key={item.name}
+                  selected={repo === item.name}
+                  onSelect={() => setRepo(item.name)}
+                  onToggle={() => hideRepo(item.name)}
+                  toggleLabel={`Hide ${item.name}`}
+                  toggleTitle="Hide repository"
+                  icon={<EyeOffIcon />}
+                />
+              ))}
+              {hiddenRepoSummaries.length > 0 ? (
+                <div className="hidden-group" data-open={hiddenReposExpanded}>
+                  <button
+                    className="hidden-toggle"
+                    type="button"
+                    aria-expanded={hiddenReposExpanded}
+                    aria-controls="hidden-repos-list"
+                    onClick={() => setHiddenReposExpanded((expanded) => !expanded)}
+                  >
+                    <span className="chev"><ChevronIcon /></span>
+                    <span>Hidden</span>
+                    <b className="hcount">{hiddenRepoSummaries.length}</b>
+                  </button>
+                  {hiddenReposExpanded ? (
+                    <div id="hidden-repos-list" className="hidden-list">
+                      {hiddenRepoSummaries.map((item) => (
+                        <RepoFilterRow
+                          item={item}
+                          key={item.name}
+                          selected={false}
+                          muted
+                          onSelect={() => reopenRepo(item.name)}
+                          onToggle={() => reopenRepo(item.name)}
+                          toggleLabel={`Show ${item.name}`}
+                          toggleTitle="Show repository"
+                          icon={<EyeIcon />}
+                        />
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
-                {hiddenRepoSummaries.map((item) => (
-                  <RepoFilterRow
-                    item={item}
-                    key={item.name}
-                    selected={false}
-                    muted
-                    onSelect={() => reopenRepo(item.name)}
-                    onToggle={() => reopenRepo(item.name)}
-                    toggleLabel={`Show ${item.name}`}
-                    toggleTitle="Show repository"
-                    icon={<EyeIcon />}
-                  />
-                ))}
-              </>
-            ) : null}
-          </nav>
+              ) : null}
+            </nav>
+          ) : (
+            <nav className="repo-scroll" aria-label="Prompt category filters">
+              <div className="section-label">Prompt categories</div>
+              <button className="repo" type="button" aria-selected={promptCategory === "all"} onClick={() => setPromptCategory("all")}>
+                <span className="dot" />
+                <span className="name">All prompts</span>
+                <span className="count">{promptCards.length}</span>
+              </button>
+              {promptCategorySummaries.map((item) => (
+                <button className="repo" key={item.id} type="button" aria-selected={promptCategory === item.id} onClick={() => setPromptCategory(item.id)}>
+                  <span className="dot" />
+                  <span className="name">{item.name}</span>
+                  <span className="count">{item.count}</span>
+                </button>
+              ))}
+            </nav>
+          )}
         </aside>
 
-        <header className="topbar" aria-label="Document filters">
+        <header className="topbar" aria-label={activeView === "documents" ? "Document filters" : "Prompt filters"}>
           <div className="search">
             <SearchIcon />
             <input
               ref={searchRef}
               type="search"
-              placeholder="Search title, repo, path, or type..."
+              placeholder={activeSearchPlaceholder}
               aria-label="Search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              value={activeSearch}
+              onChange={(event) => activeView === "documents" ? setQuery(event.target.value) : setPromptQuery(event.target.value)}
             />
             <kbd>/</kbd>
           </div>
 
           <div className="filters">
-            <label className="field">
-              <span>Type</span>
-              <span className="select-wrap">
-                <select value={category} onChange={(event) => setCategory(event.target.value as CategoryFilter)}>
-                  <option value="all">All</option>
-                  <option value="spec">Spec</option>
-                  <option value="plan">Plan</option>
-                  <option value="doc">Doc</option>
-                  <option value="superpowers">Superpowers</option>
-                </select>
-                <ChevronIcon />
-              </span>
-            </label>
-            <label className="field">
-              <span>Date</span>
-              <span className="select-wrap">
-                <select value={date} onChange={(event) => setDate(event.target.value as DateFilter)}>
-                  <option value="all">Any time</option>
-                  <option value="7">Last 7 days</option>
-                  <option value="30">Last 30 days</option>
-                  <option value="90">Last 90 days</option>
-                </select>
-                <ChevronIcon />
-              </span>
-            </label>
-            <label className="field">
-              <span>Path</span>
-              <input type="text" placeholder="docs/specs" value={path} onChange={(event) => setPath(event.target.value)} />
-            </label>
+            {activeView === "documents" ? (
+              <>
+                <label className="field">
+                  <span>Type</span>
+                  <span className="select-wrap">
+                    <select value={category} onChange={(event) => setCategory(event.target.value as CategoryFilter)}>
+                      <option value="all">All</option>
+                      <option value="spec">Spec</option>
+                      <option value="plan">Plan</option>
+                      <option value="doc">Doc</option>
+                      <option value="superpowers">Superpowers</option>
+                    </select>
+                    <ChevronIcon />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>Date</span>
+                  <span className="select-wrap">
+                    <select value={date} onChange={(event) => setDate(event.target.value as DateFilter)}>
+                      <option value="all">Any time</option>
+                      <option value="7">Last 7 days</option>
+                      <option value="30">Last 30 days</option>
+                      <option value="90">Last 90 days</option>
+                    </select>
+                    <ChevronIcon />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>Path</span>
+                  <input type="text" placeholder="docs/specs" value={path} onChange={(event) => setPath(event.target.value)} />
+                </label>
+              </>
+            ) : (
+              <>
+                <label className="field">
+                  <span>Category</span>
+                  <span className="select-wrap">
+                    <select value={promptCategory} onChange={(event) => setPromptCategory(event.target.value as PromptCategoryFilter)}>
+                      <option value="all">All</option>
+                      {promptCategoriesOptions(promptCategorySummaries)}
+                    </select>
+                    <ChevronIcon />
+                  </span>
+                </label>
+                <label className="field">
+                  <span>Tag</span>
+                  <span className="select-wrap">
+                    <select value={promptTag} onChange={(event) => setPromptTag(event.target.value)}>
+                      <option value="all">All tags</option>
+                      {promptTags.map((tag) => <option key={tag} value={tag}>{tag}</option>)}
+                    </select>
+                    <ChevronIcon />
+                  </span>
+                </label>
+              </>
+            )}
             <label className="field compact-field">
               <span>Accent</span>
               <span className="select-wrap">
@@ -441,41 +554,62 @@ export default function Home() {
                 <ChevronIcon />
               </span>
             </label>
-            <button className="icon-btn" type="button" title="Refresh index" aria-label="Refresh index" onClick={loadDocs}>
-              <RefreshIcon />
-            </button>
+            {activeView === "documents" ? (
+              <button className="icon-btn" type="button" title="Refresh index" aria-label="Refresh index" onClick={loadDocs}>
+                <RefreshIcon />
+              </button>
+            ) : null}
           </div>
         </header>
 
-        <section className="list" aria-label="Documents">
+        <section className="list" aria-label={activeView === "documents" ? "Documents" : "Prompts"}>
           <div className="list-head">
-            <h1>Specs &amp; plans</h1>
+            <h1>{activeView === "documents" ? "Specs & plans" : "Prompt library"}</h1>
             <div className="meta">
-              {error ? error : <><b>{filteredDocs.length}</b> of {docs.length} documents</>}
+              {activeView === "documents"
+                ? error ? error : <><b>{filteredDocs.length}</b> of {docs.length} documents</>
+                : <><b>{filteredPrompts.length}</b> of {promptCards.length} prompts</>}
             </div>
           </div>
           <div className="list-scroll" aria-live="polite">
-            {filteredDocs.map((doc) => (
-              <button className="doc" key={doc.id} type="button" aria-selected={doc.id === selectedId} onClick={() => setSelectedId(doc.id)}>
-                <div className="doc-top">
-                  <span className="doc-title">{doc.title}</span>
-                  <span className="fmt" data-fmt={doc.kind === "markdown" ? "MD" : "HTML"}>
-                    {doc.kind === "markdown" ? "MD" : "HTML"}
-                  </span>
-                </div>
-                <div className="doc-bottom">
-                  <span className="repo-tag">{doc.repoName}</span>
-                  <span className="kind" data-kind={doc.category}>
-                    {doc.category}
-                  </span>
-                  <span className="date">{formatDate(doc.modifiedAt)}</span>
-                </div>
-              </button>
-            ))}
+            {activeView === "documents" ? (
+              filteredDocs.map((doc) => (
+                <button className="doc" key={doc.id} type="button" aria-selected={doc.id === selectedId} onClick={() => setSelectedId(doc.id)}>
+                  <div className="doc-top">
+                    <span className="doc-title">{doc.title}</span>
+                    <span className="fmt" data-fmt={doc.kind === "markdown" ? "MD" : "HTML"}>
+                      {doc.kind === "markdown" ? "MD" : "HTML"}
+                    </span>
+                  </div>
+                  <div className="doc-bottom">
+                    <span className="repo-tag">{doc.repoName}</span>
+                    <span className="kind" data-kind={doc.category}>
+                      {doc.category}
+                    </span>
+                    <span className="date">{formatDate(doc.modifiedAt)}</span>
+                  </div>
+                </button>
+              ))
+            ) : (
+              filteredPrompts.map((card) => (
+                <button className="doc prompt-card" key={card.id} type="button" aria-selected={card.id === selectedPrompt?.id} onClick={() => setSelectedPromptId(card.id)}>
+                  <div className="doc-top">
+                    <span className="doc-title">{card.title}</span>
+                    <span className="fmt prompt-fmt">PROMPT</span>
+                  </div>
+                  <p>{card.description}</p>
+                  <div className="prompt-tags">
+                    {card.tags.slice(0, 3).map((tag) => <span key={tag}>{tag}</span>)}
+                  </div>
+                </button>
+              ))
+            )}
           </div>
         </section>
 
         <main className="main" aria-label="Document view">
+          {activeView === "documents" ? (
+            <>
           <div className="doc-header">
             <div className="breadcrumb">
               <b>{selectedRepo}</b>
@@ -538,6 +672,41 @@ export default function Home() {
           <div className={`preview-wrap${selectedDoc ? "" : " empty"}`} title={selectedDoc ? "Double-click for full view" : undefined} onDoubleClick={() => selectedDoc && setFullView(true)}>
             {renderedPreview}
           </div>
+            </>
+          ) : (
+            <>
+              <div className="doc-header prompt-header">
+                <div className="breadcrumb">
+                  <b>Prompts</b>
+                  <span>/</span>
+                  <span>{selectedPrompt ? categoryName(selectedPrompt.category) : "library"}</span>
+                  <span className="summary-text">Embedded from html-effectiveness</span>
+                </div>
+                <div className="dh-row">
+                  <div className="titleblock">
+                    <h2>{selectedPrompt?.title ?? "No prompt selected"}</h2>
+                    <div className="doc-path">
+                      <FileIcon />
+                      <span>{selectedPrompt?.description ?? "Choose a prompt page to inspect."}</span>
+                    </div>
+                  </div>
+                  <div className="actions">
+                    <button className="btn" type="button" disabled={!selectedPrompt} onClick={copyPromptSource}>
+                      <CopyIcon />
+                      {promptCopyState ? "Copied" : "Copy source URL"}
+                    </button>
+                    <a className={`btn primary${selectedPrompt ? "" : " is-disabled"}`} href={selectedPrompt?.sourceUrl ?? "#"} target="_blank" rel="noreferrer">
+                      <ExternalIcon />
+                      Open original
+                    </a>
+                  </div>
+                </div>
+              </div>
+              <div className="preview-wrap prompt-preview-wrap">
+                {selectedPrompt ? <PromptSourcePreview card={selectedPrompt} /> : null}
+              </div>
+            </>
+          )}
         </main>
       </div>
 
@@ -644,7 +813,10 @@ function RepoFilterRow({
         <span className="name">{item.name}</span>
         <span className="count">{item.count}</span>
       </button>
-      <button className="repo-visibility-btn" type="button" title={toggleTitle} aria-label={toggleLabel} onClick={onToggle}>
+      <button className="repo-visibility-btn" type="button" title={toggleTitle} aria-label={toggleLabel} onClick={(event) => {
+        event.stopPropagation();
+        onToggle();
+      }}>
         {icon}
       </button>
     </div>
@@ -685,6 +857,35 @@ function formatDate(input: string) {
   }).format(new Date(input));
 }
 
+function promptCategoriesOptions(categories: ReturnType<typeof summarizePromptCategories>) {
+  return categories.map((category) => (
+    <option key={category.id} value={category.id}>
+      {category.name}
+    </option>
+  ));
+}
+
+function categoryName(categoryId: PromptCard["category"]) {
+  return summarizePromptCategories(promptCards).find((category) => category.id === categoryId)?.name ?? "Prompt";
+}
+
+function PromptSourcePreview({ card }: { card: PromptCard }) {
+  return (
+    <article className="prompt-source-shell">
+      <div className="source-note">
+        <span>Original source</span>
+        <a href={card.sourceUrl} target="_blank" rel="noreferrer">{card.sourceUrl}</a>
+      </div>
+      <iframe
+        className="prompt-source-frame"
+        title={`${card.title} from html-effectiveness`}
+        src={card.sourceUrl}
+        sandbox="allow-forms allow-popups allow-same-origin allow-scripts"
+      />
+    </article>
+  );
+}
+
 function readStoredAccent(): Accent {
   const stored = window.localStorage.getItem("spechub:accent");
   return stored === "Blue" || stored === "Violet" || stored === "Amber" ? stored : "Green";
@@ -693,6 +894,10 @@ function readStoredAccent(): Accent {
 function readStoredDensity(): Density {
   const stored = window.localStorage.getItem("spechub:density");
   return stored === "compact" || stored === "comfy" ? stored : "regular";
+}
+
+function readStoredView(): ActiveView {
+  return window.localStorage.getItem("spechub:view") === "prompts" ? "prompts" : "documents";
 }
 
 function readStoredHiddenRepos() {

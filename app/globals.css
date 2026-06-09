@@ -209,6 +209,50 @@ button:disabled,
   padding: 0;
 }
 
+.view-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+  padding: 10px;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.view-tabs button {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-surface);
+  color: var(--c-ink-2);
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.view-tabs button:hover {
+  background: var(--c-hover);
+  color: var(--c-ink);
+}
+
+.view-tabs button[aria-selected="true"] {
+  background: var(--accent-soft);
+  border-color: var(--accent-line);
+  color: var(--accent-strong);
+}
+
+.app[data-sidebar="collapsed"] .view-tabs {
+  grid-template-columns: 1fr;
+  padding: 8px;
+}
+
+.app[data-sidebar="collapsed"] .view-tabs button {
+  font-size: 0;
+}
+
+.app[data-sidebar="collapsed"] .view-tabs button::before {
+  content: attr(data-short);
+  font-size: 12px;
+}
+
 .repo-scroll {
   flex: 1;
   min-height: 0;
@@ -291,6 +335,7 @@ button:disabled,
   font-size: 11px;
   font-weight: 500;
   text-align: center;
+  transition: opacity 0.14s;
 }
 
 .repo[aria-selected="true"] {
@@ -312,10 +357,7 @@ button:disabled,
 }
 
 .repo-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) 32px;
-  gap: 5px;
-  align-items: center;
+  position: relative;
   min-width: 0;
 }
 
@@ -328,53 +370,103 @@ button:disabled,
 }
 
 .repo-visibility-btn {
-  width: 32px;
-  height: 32px;
+  position: absolute;
+  right: 9px;
+  top: 50%;
+  width: 26px;
+  height: 26px;
   display: grid;
   place-items: center;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 7px;
   background: transparent;
   color: var(--c-ink-3);
-  transition: 0.13s;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.14s, background 0.13s, color 0.13s, box-shadow 0.13s;
+}
+
+.repo-row:hover .repo-visibility-btn,
+.repo-row:focus-within .repo-visibility-btn {
+  opacity: 1;
+  pointer-events: auto;
+}
+
+.repo-row:hover .repo .count,
+.repo-row:focus-within .repo .count {
+  opacity: 0;
 }
 
 .repo-visibility-btn:hover {
-  border-color: var(--c-border);
-  background: var(--c-hover);
-  color: var(--accent-strong);
+  background: var(--c-surface);
+  color: var(--c-ink);
+  box-shadow: var(--shadow-sm);
 }
 
 .repo-visibility-btn svg {
-  width: 15px;
-  height: 15px;
+  width: 16px;
+  height: 16px;
 }
 
-.hidden-repos-head {
+.hidden-group {
+  margin-top: 6px;
+}
+
+.hidden-toggle {
+  width: 100%;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 8px;
-  margin: 14px 2px 5px;
-  padding: 8px 8px 6px;
-  border-top: 1px solid var(--c-border);
+  padding: 7px 11px;
+  border: 0;
+  border-radius: var(--radius-sm);
   color: var(--c-ink-3);
   font-family: var(--font-mono);
   font-size: 10.5px;
   font-weight: 600;
-  letter-spacing: 0.14em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
+  background: transparent;
+  transition: 0.13s;
 }
 
-.hidden-repos-head b {
-  min-width: 22px;
-  padding: 1px 6px;
-  border-radius: 999px;
-  background: var(--c-border);
+.hidden-toggle:hover {
+  background: var(--c-hover);
   color: var(--c-ink-2);
+}
+
+.hidden-toggle .chev {
+  display: grid;
+  place-items: center;
+  transform: rotate(-90deg);
+  transition: transform 0.2s;
+}
+
+.hidden-toggle .chev svg {
+  width: 12px;
+  height: 12px;
+}
+
+.hidden-group[data-open="true"] .hidden-toggle .chev {
+  transform: rotate(0);
+}
+
+.hidden-toggle .hcount {
+  margin-left: auto;
+  padding: 1px 7px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-ink-3);
   font-size: 10px;
-  letter-spacing: 0;
+  letter-spacing: 0.02em;
   text-align: center;
+}
+
+.hidden-list {
+  display: block;
+  padding-top: 3px;
 }
 
 .repo-row.is-muted .repo {
@@ -384,6 +476,20 @@ button:disabled,
 .repo-row.is-muted .repo .dot {
   background: transparent;
   border: 1px solid var(--c-border-2);
+}
+
+.hidden-list .repo-visibility-btn {
+  opacity: 1;
+  pointer-events: auto;
+  color: var(--c-ink-3);
+}
+
+.hidden-list .repo .count {
+  opacity: 0;
+}
+
+.hidden-list .repo-visibility-btn:hover {
+  color: var(--c-ink);
 }
 
 .app[data-sidebar="collapsed"] .repo .name,
@@ -397,12 +503,8 @@ button:disabled,
   padding-right: 0;
 }
 
-.app[data-sidebar="collapsed"] .repo-row {
-  grid-template-columns: 1fr;
-}
-
 .app[data-sidebar="collapsed"] .repo-visibility-btn,
-.app[data-sidebar="collapsed"] .hidden-repos-head b {
+.app[data-sidebar="collapsed"] .hidden-group {
   display: none;
 }
 
@@ -812,6 +914,35 @@ button:disabled,
   background: var(--accent);
 }
 
+.prompt-card p {
+  margin: -4px 0 12px;
+  color: var(--c-ink-2);
+  font-size: 12.5px;
+  line-height: 1.4;
+}
+
+.prompt-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.prompt-tags span {
+  padding: 2px 7px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: var(--c-page);
+  color: var(--c-ink-3);
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+
+.prompt-fmt {
+  color: var(--accent-strong);
+  border-color: var(--accent-line);
+  background: var(--accent-soft);
+}
+
 .main {
   min-width: 0;
   min-height: 0;
@@ -897,7 +1028,9 @@ button:disabled,
   justify-content: flex-end;
   flex-wrap: wrap;
   gap: 7px;
-  flex-shrink: 0;
+  flex: 0 1 520px;
+  min-width: 0;
+  max-width: min(520px, 52%);
 }
 
 .btn {
@@ -1260,6 +1393,66 @@ button:disabled,
   margin: 0 auto;
 }
 
+.prompt-preview-wrap {
+  padding: 18px;
+  background: var(--c-page);
+}
+
+.prompt-source-shell {
+  display: grid;
+  grid-template-rows: auto minmax(680px, calc(100vh - 282px));
+  min-height: 760px;
+  border: 1px solid var(--c-border);
+  border-radius: 8px;
+  background: var(--c-surface);
+  box-shadow: var(--shadow-md);
+  overflow: hidden;
+}
+
+.source-note {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--c-border);
+  background: var(--c-raised);
+  color: var(--c-ink-3);
+  font-size: 12px;
+}
+
+.source-note span {
+  flex: 0 0 auto;
+  color: var(--accent-strong);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.source-note a {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--c-ink-2);
+  text-decoration: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.source-note a:hover {
+  color: var(--accent-strong);
+  text-decoration: underline;
+}
+
+.prompt-source-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 680px;
+  border: 0;
+  background: #fff;
+}
+
 @media (max-width: 1280px) {
   .app {
     --col-list: 336px;
@@ -1325,18 +1518,27 @@ button:disabled,
     padding: 0 14px 0 16px;
   }
 
+  .app[data-sidebar="collapsed"] .view-tabs,
+  .view-tabs {
+    grid-template-columns: 1fr 1fr;
+    padding: 10px 12px;
+  }
+
+  .app[data-sidebar="collapsed"] .view-tabs button {
+    font-size: 12.5px;
+  }
+
   .app[data-sidebar="collapsed"] .repo {
     justify-content: space-between;
     padding: var(--row-pad-y) 11px;
   }
 
-  .app[data-sidebar="collapsed"] .repo-row {
-    grid-template-columns: minmax(0, 1fr) 32px;
+  .app[data-sidebar="collapsed"] .repo-visibility-btn {
+    display: grid;
   }
 
-  .app[data-sidebar="collapsed"] .repo-visibility-btn,
-  .app[data-sidebar="collapsed"] .hidden-repos-head b {
-    display: grid;
+  .app[data-sidebar="collapsed"] .hidden-group {
+    display: block;
   }
 
   .topbar {
@@ -1422,6 +1624,7 @@ button:disabled,
 
   .actions {
     justify-content: flex-start;
+    max-width: 100%;
   }
 
   .title-editor {
@@ -1443,6 +1646,21 @@ button:disabled,
   .markdown-body {
     padding: 28px 22px 32px;
     font-size: 15px;
+  }
+
+  .prompt-preview-wrap {
+    padding: 12px;
+  }
+
+  .prompt-source-shell {
+    grid-template-rows: auto minmax(620px, 70vh);
+    min-height: 680px;
+  }
+
+  .source-note {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 5px;
   }
 
   .markdown-body h1 {
