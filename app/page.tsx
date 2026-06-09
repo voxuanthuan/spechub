@@ -260,9 +260,6 @@ export default function Home() {
   }, [filteredPrompts, selectedPromptId]);
 
   useEffect(() => {
-    if (repo !== "all" && hiddenRepoSet.has(repo)) {
-      setRepo("all");
-    }
     if (selectedDoc && hiddenRepoSet.has(selectedDoc.repoName)) {
       setSelectedId(filteredDocs[0]?.id ?? null);
     }
@@ -495,25 +492,27 @@ export default function Home() {
           </div>
 
           {activeView === "documents" ? (
-            <nav className="repo-scroll" aria-label="Repository filters">
-              <div className="section-label">Repositories</div>
-              <button className="repo" type="button" aria-selected={repo === "all"} onClick={() => setRepo("all")}>
-                <span className="dot" />
-                <span className="name">All repos</span>
-                <span className="count">{visibleDocCount}</span>
-              </button>
-              {visibleRepos.map((item) => (
-                <RepoFilterRow
-                  item={item}
-                  key={item.name}
-                  selected={repo === item.name}
-                  onSelect={() => setRepo(item.name)}
-                  onToggle={() => hideRepo(item.name)}
-                  toggleLabel={`Hide ${item.name}`}
-                  toggleTitle="Hide repository"
-                  icon={<EyeOffIcon />}
-                />
-              ))}
+            <>
+              <nav className="repo-scroll" aria-label="Repository filters">
+                <div className="section-label">Repositories</div>
+                <button className="repo" type="button" aria-selected={repo === "all"} onClick={() => setRepo("all")}>
+                  <span className="dot" />
+                  <span className="name">All repos</span>
+                  <span className="count">{visibleDocCount}</span>
+                </button>
+                {visibleRepos.map((item) => (
+                  <RepoFilterRow
+                    item={item}
+                    key={item.name}
+                    selected={repo === item.name}
+                    onSelect={() => setRepo(item.name)}
+                    onToggle={() => hideRepo(item.name)}
+                    toggleLabel={`Hide ${item.name}`}
+                    toggleTitle="Hide repository"
+                    icon={<EyeOffIcon />}
+                  />
+                ))}
+              </nav>
               {hiddenRepoSummaries.length > 0 ? (
                 <div className="hidden-group" data-open={hiddenReposExpanded}>
                   <button
@@ -533,20 +532,20 @@ export default function Home() {
                         <RepoFilterRow
                           item={item}
                           key={item.name}
-                          selected={false}
+                          selected={repo === item.name}
                           muted
-                          onSelect={() => reopenRepo(item.name)}
+                          onSelect={() => setRepo(item.name)}
                           onToggle={() => reopenRepo(item.name)}
                           toggleLabel={`Show ${item.name}`}
                           toggleTitle="Show repository"
-                          icon={<EyeIcon />}
+                          icon={<PlusCircleIcon />}
                         />
                       ))}
                     </div>
                   ) : null}
                 </div>
               ) : null}
-            </nav>
+            </>
           ) : (
             <nav className="repo-scroll" aria-label="Prompt category filters">
               <div className="section-label">Prompt categories</div>
@@ -977,7 +976,7 @@ export function filterDocs(
 
   return docs.filter((doc) => {
     const haystack = `${doc.title} ${doc.repoName} ${doc.relativePath} ${doc.kind} ${doc.category}`.toLowerCase();
-    if (hiddenRepoSet.has(doc.repoName)) return false;
+    if (filters.repo === "all" && hiddenRepoSet.has(doc.repoName)) return false;
     if (filters.repo !== "all" && doc.repoName !== filters.repo) return false;
     if (filters.category !== "all" && doc.category !== filters.category) return false;
     if (query && !haystack.includes(query)) return false;
@@ -1156,12 +1155,12 @@ function RefreshIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4" /><path d="M21 3v5h-5" /></svg>;
 }
 
-function EyeIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-6 10-6 10 6 10 6-3.5 6-10 6-10-6-10-6Z" /><circle cx="12" cy="12" r="3" /></svg>;
-}
-
 function EyeOffIcon() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 3 18 18" /><path d="M10.6 10.6A3 3 0 0 0 13.4 13.4" /><path d="M9.9 4.2A10.7 10.7 0 0 1 12 4c6.5 0 10 8 10 8a17.4 17.4 0 0 1-2.7 3.7" /><path d="M6.6 6.6C3.6 8.7 2 12 2 12s3.5 8 10 8a10.9 10.9 0 0 0 4.7-1" /></svg>;
+}
+
+function PlusCircleIcon() {
+  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 8v8M8 12h8" /></svg>;
 }
 
 function FileIcon() {

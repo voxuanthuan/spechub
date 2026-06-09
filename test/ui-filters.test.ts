@@ -38,7 +38,7 @@ describe("dashboard document filters", () => {
     expect(page.filterDocs(docs, { repo: "all", query: "", category: "spec", date: "all", path: "" })[0].id).toBe("spec-1");
   });
 
-  it("excludes hidden repositories from document browsing until reopened", async () => {
+  it("excludes hidden repositories from all browsing while allowing direct hidden repo selection", async () => {
     const page = await import("../app/page.js");
     const docs = [
       {
@@ -74,7 +74,7 @@ describe("dashboard document filters", () => {
     ] satisfies Parameters<typeof page.filterDocs>[0];
 
     expect(page.filterDocs(docs, { repo: "all", query: "", category: "all", date: "all", path: "", hiddenRepos: ["hidden"] }).map((doc) => doc.id)).toEqual(["visible-1"]);
-    expect(page.filterDocs(docs, { repo: "hidden", query: "", category: "all", date: "all", path: "", hiddenRepos: ["hidden"] })).toHaveLength(0);
+    expect(page.filterDocs(docs, { repo: "hidden", query: "", category: "all", date: "all", path: "", hiddenRepos: ["hidden"] }).map((doc) => doc.id)).toEqual(["hidden-1"]);
     expect(page.filterDocs(docs, { repo: "all", query: "", category: "all", date: "all", path: "", hiddenRepos: [] })).toHaveLength(2);
   });
 });
