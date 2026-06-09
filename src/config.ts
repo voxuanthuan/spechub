@@ -28,6 +28,17 @@ export const DEFAULT_DOC_PATTERNS = [
 
 export const DEFAULT_CONFIG_PATH = "~/.config/spechub/config.json";
 
+const DEFAULT_AGENT_DOC_PATTERNS = [
+  "plans/**/*.{md,markdown,html}",
+  "plan/**/*.{md,markdown,html}",
+  "specs/**/*.{md,markdown,html}",
+  "spec/**/*.{md,markdown,html}",
+  "docs/**/*.{md,markdown,html}",
+  "reports/**/*.{md,markdown,html}"
+];
+
+const DEFAULT_AGENT_SOURCE_NAMES = ["opencode", "codex", "claude", "cursor", "augment", "windsurf"];
+
 export function expandHome(input: string): string {
   if (input === "~") return os.homedir();
   if (input.startsWith("~/")) return path.join(os.homedir(), input.slice(2));
@@ -37,24 +48,31 @@ export function expandHome(input: string): string {
 export function defaultConfig(): SpecHubConfig {
   const roots = ["~/workspace", "~/.multica/server"].map(expandHome);
   const docPatterns = [...DEFAULT_DOC_PATTERNS];
-  const agentSourceNames = ["opencode", "codex", "claude", "cursor", "augment", "windsurf"];
   return {
     roots,
     ignorePatterns: [...DEFAULT_IGNORE_PATTERNS],
     docPatterns,
     sources: [
       legacySource(roots, docPatterns),
-      ...agentSourceNames.map((name) => ({
+      ...DEFAULT_AGENT_SOURCE_NAMES.map((name) => ({
         name,
         mode: "direct" as const,
-        roots: [expandHome(`~/.${name}`)],
-        patterns: ["**/*.{md,markdown,html}"],
+        roots: defaultAgentRoots(name),
+        patterns: [...DEFAULT_AGENT_DOC_PATTERNS],
         inferRepoFromContent: true,
         defaultCategory: "plan" as const
       }))
     ],
     titleOverrides: {}
   };
+}
+
+function defaultAgentRoots(name: string): string[] {
+  const roots = [expandHome(`~/.${name}`)];
+  if (name === "opencode") {
+    roots.push(expandHome("~/.local/share/opencode"));
+  }
+  return roots;
 }
 
 export function normalizeOverridePath(input: string): string {

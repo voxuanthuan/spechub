@@ -175,15 +175,86 @@ describe("scanDocuments", () => {
     ]);
     expect(sourceByName.get("opencode")).toMatchObject({
       mode: "direct",
-      roots: [path.join(os.homedir(), ".opencode")],
-      patterns: ["**/*.{md,markdown,html}"],
+      roots: [path.join(os.homedir(), ".opencode"), path.join(os.homedir(), ".local", "share", "opencode")],
+      patterns: [
+        "plans/**/*.{md,markdown,html}",
+        "plan/**/*.{md,markdown,html}",
+        "specs/**/*.{md,markdown,html}",
+        "spec/**/*.{md,markdown,html}",
+        "docs/**/*.{md,markdown,html}",
+        "reports/**/*.{md,markdown,html}"
+      ],
       inferRepoFromContent: true,
       defaultCategory: "plan"
     });
     expect(sourceByName.get("claude")).toMatchObject({
       mode: "direct",
       roots: [path.join(os.homedir(), ".claude")],
-      patterns: ["**/*.{md,markdown,html}"]
+      patterns: [
+        "plans/**/*.{md,markdown,html}",
+        "plan/**/*.{md,markdown,html}",
+        "specs/**/*.{md,markdown,html}",
+        "spec/**/*.{md,markdown,html}",
+        "docs/**/*.{md,markdown,html}",
+        "reports/**/*.{md,markdown,html}"
+      ]
     });
+  });
+
+  it("scans agent plans while ignoring tool internals", async () => {
+    const root = await fixtureRoot();
+    const opencodeConfig = path.join(root, ".opencode");
+    const opencodeData = path.join(root, ".local", "share", "opencode");
+    const claude = path.join(root, ".claude");
+    const codex = path.join(root, ".codex");
+
+    await mkdir(path.join(opencodeConfig, "commands"), { recursive: true });
+    await mkdir(path.join(opencodeConfig, "node_modules", "@standard-schema", "spec"), { recursive: true });
+    await mkdir(path.join(opencodeData, "plans"), { recursive: true });
+    await mkdir(path.join(opencodeData, "storage", "session_diff"), { recursive: true });
+    await mkdir(path.join(claude, "plans"), { recursive: true });
+    await mkdir(path.join(claude, "skills", "planner"), { recursive: true });
+    await mkdir(path.join(codex, "docs", "specs"), { recursive: true });
+    await mkdir(path.join(codex, "skills", "planner"), { recursive: true });
+    await mkdir(path.join(codex, "memories"), { recursive: true });
+
+    await writeFile(path.join(opencodeConfig, "commands", "plan.md"), "# OpenCode Command\n");
+    await writeFile(path.join(opencodeConfig, "node_modules", "@standard-schema", "spec", "README.md"), "# Package Spec\n");
+    await writeFile(path.join(opencodeData, "plans", "checkout.md"), "# OpenCode Plan\n");
+    await writeFile(path.join(opencodeData, "storage", "session_diff", "ses_123.json"), "{}");
+    await writeFile(path.join(claude, "plans", "migration.md"), "# Claude Plan\n");
+    await writeFile(path.join(claude, "skills", "planner", "SKILL.md"), "# Claude Skill\n");
+    await writeFile(path.join(codex, "docs", "specs", "api.md"), "# Codex API Spec\n");
+    await writeFile(path.join(codex, "skills", "planner", "SKILL.md"), "# Codex Skill\n");
+    await writeFile(path.join(codex, "memories", "raw_memories.md"), "# Codex Memory\n");
+
+    const docs = await scanDocuments({
+      roots: [path.join(root, "workspace")],
+      sources: [
+        {
+          ...defaultConfig().sources.find((source) => source.name === "opencode")!,
+          roots: [opencodeConfig, opencodeData]
+        },
+        {
+          ...defaultConfig().sources.find((source) => source.name === "claude")!,
+          roots: [claude]
+        },
+        {
+          ...defaultConfig().sources.find((source) => source.name === "codex")!,
+          roots: [codex]
+        }
+      ]
+    });
+
+    expect(docs.map((doc) => doc.title).sort()).toEqual([
+      "Claude Plan",
+      "Codex API Spec",
+      "OpenCode Plan"
+    ]);
+    expect(docs.map((doc) => doc.relativePath).sort()).toEqual([
+      "docs/specs/api.md",
+      "plans/checkout.md",
+      "plans/migration.md"
+    ]);
   });
 });
