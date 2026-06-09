@@ -1,0 +1,49 @@
+{
+  "name": "spechub",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "spechub": "./dist/src/cli.js"
+  },
+  "scripts": {
+    "build": "pnpm build:web && pnpm build:server",
+    "build:desktop": "tauri build",
+    "build:server": "tsc -p tsconfig.server.json",
+    "build:web": "next build",
+    "dev": "pnpm dev:desktop",
+    "dev:browser": "pnpm build:web && tsx src/cli.ts --open",
+    "dev:desktop": "tauri dev",
+    "dev:web": "next dev",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2.11.0",
+    "commander": "^12.1.0",
+    "dompurify": "^3.4.8",
+    "express": "^4.19.2",
+    "fast-glob": "^3.3.2",
+    "marked": "^13.0.3",
+    "micromatch": "^4.0.8",
+    "next": "^16.2.7",
+    "open": "^10.1.0",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "sanitize-html": "^2.13.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.11.2",
+    "@types/express": "^4.17.21",
+    "@types/micromatch": "^4.0.9",
+    "@types/node": "^20.14.11",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@types/sanitize-html": "^2.11.0",
+    "@types/supertest": "^6.0.2",
+    "supertest": "^7.0.0",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.3",
+    "vitest": "^1.6.0"
+  }
+}

@@ -1,0 +1,43 @@
+export type DocumentKind = "markdown" | "html";
+export type DocumentCategory = "plan" | "spec" | "superpowers" | "doc";
+export type SourceMode = "repositories" | "direct";
+
+export interface SpecHubSource {
+  name: string;
+  mode: SourceMode;
+  roots: string[];
+  patterns: string[];
+  inferRepoFromContent?: boolean;
+  defaultCategory?: DocumentCategory;
+}
+
+export interface SpecHubConfig {
+  roots: string[];
+  ignorePatterns: string[];
+  docPatterns: string[];
+  sources: SpecHubSource[];
+  titleOverrides: Record<string, string>;
+}
+
+export type RuntimeSpecHubConfig = Partial<SpecHubConfig> & { configPath?: string; explicitRoots?: boolean };
+
+export interface DocumentMeta {
+  id: string;
+  title: string;
+  sourceTitle: string;
+  kind: DocumentKind;
+  category: DocumentCategory;
+  sourceName: string;
+  absolutePath: string;
+  relativePath: string;
+  repoName: string;
+  repoRoot: string;
+  modifiedAt: string;
+  mtimeMs: number;
+  sizeBytes: number;
+}
+
+export interface DocumentDetail extends DocumentMeta {
+  rawUrl: string;
+  renderedHtml?: string;
+}

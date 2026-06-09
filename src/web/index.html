@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>SpecHub</title>
+    <link rel="stylesheet" href="/assets/styles.css">
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="rail" aria-label="Repositories">
+        <div class="brand">
+          <span class="brand-mark">SH</span>
+          <div class="brand-copy">
+            <strong>SpecHub</strong>
+            <small>Local docs index</small>
+          </div>
+          <button id="toggle-sidebar" class="collapse-button" type="button" title="Collapse sidebar" aria-label="Collapse sidebar" aria-pressed="false">‹</button>
+        </div>
+        <button class="repo-pill is-active" data-repo="all" type="button">
+          <span>All repos</span>
+          <strong id="all-count">0</strong>
+        </button>
+        <div id="repo-list" class="repo-list"></div>
+      </aside>
+
+      <main class="workspace">
+        <section class="toolbar" aria-label="Document filters">
+          <div class="search-box">
+            <label for="search">Search</label>
+            <input id="search" type="search" placeholder="Title, repo, path, type">
+          </div>
+          <label>
+            Type
+            <select id="kind-filter">
+              <option value="all">All</option>
+              <option value="markdown">Markdown</option>
+              <option value="html">HTML</option>
+            </select>
+          </label>
+          <label>
+            Date
+            <select id="date-filter">
+              <option value="all">Any time</option>
+              <option value="7">Last 7 days</option>
+              <option value="30">Last 30 days</option>
+              <option value="90">Last 90 days</option>
+            </select>
+          </label>
+          <label class="path-filter">
+            Path
+            <input id="path-filter" type="search" placeholder="docs/specs">
+          </label>
+          <button id="refresh" class="icon-button" type="button" title="Refresh index" aria-label="Refresh index">R</button>
+        </section>
+
+        <section class="content">
+          <section class="document-pane" aria-label="Documents">
+            <div class="pane-heading">
+              <div>
+                <h1>Specs and plans</h1>
+                <p id="result-summary">Indexing local files...</p>
+              </div>
+            </div>
+            <div id="doc-list" class="doc-list" aria-live="polite"></div>
+          </section>
+
+          <section class="preview-pane" aria-label="Preview">
+            <div class="preview-header">
+              <div>
+                <span id="preview-kicker">Select a document</span>
+                <h2 id="preview-title">No document selected</h2>
+                <p id="preview-path"></p>
+              </div>
+              <div class="actions">
+                <button id="copy-path" type="button" disabled>Copy path</button>
+                <button id="open-folder" type="button" disabled>Folder</button>
+                <button id="open-source" type="button" disabled>Source</button>
+                <a id="open-raw" class="button-link secondary-action is-disabled" href="#" target="_blank" rel="noreferrer">Raw</a>
+              </div>
+            </div>
+            <div id="preview" class="preview empty">
+              <div class="empty-state">
+                <strong>Pick a document from the index.</strong>
+                <span>Markdown renders here. HTML files open in a locked-down preview frame.</span>
+              </div>
+            </div>
+          </section>
+        </section>
+      </main>
+    </div>
+
+    <script src="/assets/app.js" type="module"></script>
+  </body>
+</html>
