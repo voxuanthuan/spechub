@@ -9,10 +9,12 @@ It indexes local repositories and agent folders, groups documents by repository,
 - Scans one or more local folders for Markdown and HTML documents.
 - Detects document type such as `spec`, `plan`, `doc`, or `superpowers` from file paths.
 - Groups documents by repository and supports direct global folders like `~/.claude/plans`.
+- Indexes OpenCode plan-mode sessions from the local OpenCode database (`~/.local/share/opencode`) as readable Markdown.
 - Provides browser filters for repository, document type, date, path, and search text.
 - Renders Markdown with sanitized HTML and GitHub-flavored Markdown support.
 - Previews HTML documents in a restricted iframe.
 - Lets you copy file paths, open source files, open folders, and override display titles.
+- Ships a built-in prompt gallery that embeds the original html-effectiveness prompt/result pages for browser-first use.
 
 ## Quick Start: Browser Dashboard
 
@@ -88,6 +90,14 @@ Example:
       "patterns": ["*.md", "*.markdown"],
       "inferRepoFromContent": true,
       "defaultCategory": "plan"
+    },
+    {
+      "name": "opencode-plan-sessions",
+      "mode": "opencode-db",
+      "roots": ["~/.local/share/opencode"],
+      "patterns": [],
+      "inferRepoFromContent": true,
+      "defaultCategory": "plan"
     }
   ],
   "titleOverrides": {
@@ -98,7 +108,7 @@ Example:
 
 If `sources` is omitted, SpecHub uses the legacy `roots` and `docPatterns` repository scan behavior.
 
-Use `mode: "repositories"` when each child folder is a project repository. Use `mode: "direct"` for global agent folders such as `~/.claude`, `~/.codex`, or shared notes folders.
+Use `mode: "repositories"` when each child folder is a project repository. Use `mode: "direct"` for global agent folders such as `~/.claude`, `~/.codex`, or shared notes folders. Use `mode: "opencode-db"` to index OpenCode plan-mode sessions stored in a local SQLite database; the source's `roots` should point at directories containing `opencode.db` files (defaults to `~/.local/share/opencode`).
 
 `titleOverrides` only changes the display title in SpecHub. It does not edit the source Markdown or HTML file.
 
@@ -159,6 +169,13 @@ The browser dashboard is exported with Next.js into `out/`. The Express server s
 
 ## Browser Controls
 
+SpecHub has two browser views:
+
+- `Documents`: scanned local specs, plans, Markdown files, and HTML artifacts.
+- `Prompts`: embedded html-effectiveness prompt/result pages grouped by common engineering and design work.
+
+Document controls:
+
 - Search: title, repository, path, extension, and category text.
 - Repository rail: limit the document list to one repository.
 - Type: filter by `spec`, `plan`, `doc`, or `superpowers`.
@@ -169,6 +186,15 @@ The browser dashboard is exported with Next.js into `out/`. The Express server s
 - `/`: focus search.
 - `F`: open full view for the selected document.
 - `Esc`: close full view.
+
+Prompt controls:
+
+- Category rail: browse prompt groups such as planning, code review, design, diagrams, reports, and custom editors.
+- Search: find source pages by title, description, tag, or original URL.
+- Tag: narrow prompts by work style such as `diagram`, `pr`, `prototype`, or `report`.
+- Copy source URL: copy the original html-effectiveness page URL.
+- Open original: open the source page in a new browser tab.
+- Embedded preview: inspect the exact original prompt/result page inside SpecHub.
 
 ## Development
 
@@ -187,13 +213,13 @@ You can also run the installer from the checkout:
 ./install.sh
 ```
 
-Run the browser dashboard during development:
+Run the browser dashboard during development (Express API + the exported Next.js UI, which is what `spechub --open` ships):
 
 ```sh
 pnpm dev:browser
 ```
 
-Run the Next.js frontend only:
+Run the Next.js frontend only (no Express server, so `/api/docs` and `/raw/:id` are unavailable — useful for UI styling work):
 
 ```sh
 pnpm dev:web

@@ -13,6 +13,8 @@ use std::{
 };
 use walkdir::WalkDir;
 
+mod opencode;
+
 const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
     ".git",
     "node_modules",
@@ -36,38 +38,51 @@ const DEFAULT_DOC_PATTERNS: &[&str] = &[
     "plan.md",
 ];
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-enum DocumentKind {
+pub(crate) enum DocumentKind {
     Markdown,
     Html,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
-enum DocumentCategory {
+pub(crate) enum DocumentCategory {
     Plan,
     Spec,
     Superpowers,
     Doc,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "type", rename_all = "kebab-case")]
+pub(crate) enum DocumentContentSource {
+    File,
+    #[serde(rename_all = "camelCase")]
+    OpencodeDb {
+        db_path: String,
+        session_id: String,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct DocumentMeta {
-    id: String,
-    title: String,
-    source_title: String,
-    kind: DocumentKind,
-    category: DocumentCategory,
-    source_name: String,
-    absolute_path: String,
-    relative_path: String,
-    repo_name: String,
-    repo_root: String,
-    modified_at: String,
-    mtime_ms: f64,
-    size_bytes: u64,
+pub(crate) struct DocumentMeta {
+    pub id: String,
+    pub title: String,
+    pub source_title: String,
+    pub kind: DocumentKind,
+    pub category: DocumentCategory,
+    pub source_name: String,
+    pub absolute_path: String,
+    pub relative_path: String,
+    pub repo_name: String,
+    pub repo_root: String,
+    pub modified_at: String,
+    pub mtime_ms: f64,
+    pub size_bytes: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_source: Option<DocumentContentSource>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -97,10 +112,11 @@ struct DetailPayload {
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
-#[serde(rename_all = "lowercase")]
-enum SourceMode {
+#[serde(rename_all = "kebab-case")]
+pub(crate) enum SourceMode {
     Repositories,
     Direct,
+    OpencodeDb,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -115,19 +131,19 @@ struct PartialSourceConfig {
 }
 
 #[derive(Debug, Clone)]
-struct SourceConfig {
-    name: String,
-    mode: SourceMode,
-    roots: Vec<PathBuf>,
-    patterns: Vec<String>,
-    infer_repo_from_content: bool,
-    default_category: Option<DocumentCategory>,
+pub(crate) struct SourceConfig {
+    pub name: String,
+    pub mode: SourceMode,
+    pub roots: Vec<PathBuf>,
+    pub patterns: Vec<String>,
+    pub infer_repo_from_content: bool,
+    pub default_category: Option<DocumentCategory>,
 }
 
 #[derive(Debug, Clone)]
-struct RepoHint {
-    root: String,
-    name: String,
+pub(crate) struct RepoHint {
+    pub root: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -167,7 +183,7 @@ fn scan_documents(state: tauri::State<'_, AppState>) -> Result<ScanPayload, Stri
 #[tauri::command]
 fn get_document(id: String, state: tauri::State<'_, AppState>) -> Result<DetailPayload, String> {
     let doc = find_document(&state, &id)?;
-    let raw_content = fs::read_to_string(&doc.absolute_path).map_err(|error| error.to_string())?;
+    let raw_content = read_document_content(&doc)?;
 
     Ok(DetailPayload {
         doc: DocumentDetail {
@@ -181,21 +197,27 @@ fn get_document(id: String, state: tauri::State<'_, AppState>) -> Result<DetailP
 #[tauri::command]
 fn read_raw_document(id: String, state: tauri::State<'_, AppState>) -> Result<String, String> {
     let doc = find_document(&state, &id)?;
-    fs::read_to_string(doc.absolute_path).map_err(|error| error.to_string())
+    read_document_content(&doc)
 }
 
 #[tauri::command]
 fn open_document_source(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let doc = find_document(&state, &id)?;
-    open_path(&doc.absolute_path)
+    open_path(&open_target(&doc).to_string_lossy())
 }
 
 #[tauri::command]
 fn open_document_folder(id: String, state: tauri::State<'_, AppState>) -> Result<(), String> {
     let doc = find_document(&state, &id)?;
-    let folder = Path::new(&doc.absolute_path)
-        .parent()
-        .ok_or_else(|| "Document folder not found".to_string())?;
+    let target = open_target(&doc);
+    let folder = if target.is_dir() {
+        target
+    } else {
+        target
+            .parent()
+            .map(Path::to_path_buf)
+            .ok_or_else(|| "Document folder not found".to_string())?
+    };
     open_path(&folder.to_string_lossy())
 }
 
@@ -209,7 +231,7 @@ fn update_document_title(id: String, title: String, state: tauri::State<'_, AppS
         .into_iter()
         .find(|candidate| candidate.id == id)
         .ok_or_else(|| "Document not found".to_string())?;
-    let raw_content = fs::read_to_string(&updated.absolute_path).map_err(|error| error.to_string())?;
+    let raw_content = read_document_content(&updated)?;
 
     Ok(DetailPayload {
         doc: DocumentDetail {
@@ -218,6 +240,42 @@ fn update_document_title(id: String, title: String, state: tauri::State<'_, AppS
             raw_content,
         },
     })
+}
+
+fn read_document_content(doc: &DocumentMeta) -> Result<String, String> {
+    if let Some(DocumentContentSource::OpencodeDb { db_path, session_id }) = &doc.content_source {
+        return opencode::read_opencode_plan_content(db_path, session_id);
+    }
+    if let Some((db_path, session_id)) = opencode::parse_synthetic_path(&doc.absolute_path) {
+        return opencode::read_opencode_plan_content(&db_path, &session_id);
+    }
+    fs::read_to_string(&doc.absolute_path).map_err(|error| error.to_string())
+}
+
+fn open_target(doc: &DocumentMeta) -> PathBuf {
+    let is_opencode_db = matches!(
+        doc.content_source,
+        Some(DocumentContentSource::OpencodeDb { .. })
+    ) || opencode::parse_synthetic_path(&doc.absolute_path).is_some();
+
+    if is_opencode_db {
+        let repo_root = PathBuf::from(&doc.repo_root);
+        if repo_root.exists() {
+            return repo_root;
+        }
+        if let Some(DocumentContentSource::OpencodeDb { db_path, .. }) = &doc.content_source {
+            if let Some(parent) = Path::new(db_path).parent() {
+                return parent.to_path_buf();
+            }
+        }
+        if let Some((db_path, _)) = opencode::parse_synthetic_path(&doc.absolute_path) {
+            if let Some(parent) = Path::new(&db_path).parent() {
+                return parent.to_path_buf();
+            }
+        }
+    }
+
+    PathBuf::from(&doc.absolute_path)
 }
 
 fn find_cached_document(state: &tauri::State<'_, AppState>, id: &str) -> Result<Option<DocumentMeta>, String> {
@@ -268,16 +326,16 @@ fn scan_source(
     repo_hints: &[RepoHint],
     docs: &mut Vec<DocumentMeta>,
 ) -> Result<(), String> {
-    let doc_matcher = build_globset(&source.patterns)?;
-
     match source.mode {
         SourceMode::Repositories => {
+            let doc_matcher = build_globset(&source.patterns)?;
             let repo_roots = discover_repository_roots(&source.roots, &config.ignore_patterns);
             for repo_root in repo_roots {
                 scan_repository(&repo_root, &doc_matcher, config, &source.name, &[], source.default_category, None, docs);
             }
         }
         SourceMode::Direct => {
+            let doc_matcher = build_globset(&source.patterns)?;
             for root in &source.roots {
                 if root.exists() {
                     scan_repository(
@@ -292,6 +350,11 @@ fn scan_source(
                     );
                 }
             }
+        }
+        SourceMode::OpencodeDb => {
+            let mut plan_docs =
+                opencode::scan_opencode_plan_source(source, &config.title_overrides, repo_hints);
+            docs.append(&mut plan_docs);
         }
     }
 
@@ -356,6 +419,14 @@ fn default_config() -> SpecHubConfig {
                 mode: SourceMode::Direct,
                 roots: vec![expand_home("~/.claude/plans")],
                 patterns: vec!["*.md".to_string(), "*.markdown".to_string()],
+                infer_repo_from_content: true,
+                default_category: Some(DocumentCategory::Plan),
+            },
+            SourceConfig {
+                name: "opencode-plan-sessions".to_string(),
+                mode: SourceMode::OpencodeDb,
+                roots: vec![expand_home("~/.local/share/opencode")],
+                patterns: Vec::new(),
                 infer_repo_from_content: true,
                 default_category: Some(DocumentCategory::Plan),
             },
@@ -560,6 +631,7 @@ fn create_document_meta(
         modified_at,
         mtime_ms,
         size_bytes: metadata.len(),
+        content_source: Some(DocumentContentSource::File),
     })
 }
 
@@ -610,25 +682,26 @@ fn infer_category(relative_path: &str) -> DocumentCategory {
 }
 
 fn infer_repo_name(raw: &str, repo_hints: &[RepoHint]) -> Option<String> {
+    infer_repo_hint(raw, repo_hints).map(|repo| repo.name)
+}
+
+pub(crate) fn infer_repo_hint(raw: &str, repo_hints: &[RepoHint]) -> Option<RepoHint> {
     let normalized_raw = raw.replace('\\', "/");
     let mut hints = repo_hints.to_vec();
     hints.sort_by(|left, right| right.root.len().cmp(&left.root.len()));
 
     if let Some(repo) = hints.iter().find(|repo| normalized_raw.contains(&repo.root)) {
-        return Some(repo.name.clone());
+        return Some(repo.clone());
     }
 
-    hints
-        .into_iter()
-        .find(|repo| {
-            Regex::new(&format!(r"(?i)(^|[^\w-]){}([^\w-]|$)", regex::escape(&repo.name)))
-                .map(|regex| regex.is_match(raw))
-                .unwrap_or(false)
-        })
-        .map(|repo| repo.name)
+    hints.into_iter().find(|repo| {
+        Regex::new(&format!(r"(?i)(^|[^\w-]){}([^\w-]|$)", regex::escape(&repo.name)))
+            .map(|regex| regex.is_match(raw))
+            .unwrap_or(false)
+    })
 }
 
-fn clean_title(input: &str) -> String {
+pub(crate) fn clean_title(input: &str) -> String {
     strip_tags(input)
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -681,7 +754,7 @@ fn normalize_path(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-fn normalize_override_path(input: &str) -> String {
+pub(crate) fn normalize_override_path(input: &str) -> String {
     let path = expand_home(input);
     let absolute = if path.is_absolute() {
         path
