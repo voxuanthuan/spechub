@@ -1,11 +1,13 @@
 import path from "node:path";
-import open, { apps } from "open";
+import open from "open";
 
 export async function openBrowser(url: string): Promise<void> {
-  try {
-    await open(url, { app: { name: apps.chrome } });
-  } catch {
-    await open(url);
+  const subprocess = await open(url);
+  if (typeof subprocess.once === "function") {
+    subprocess.once("error", (error: Error) => {
+      console.warn(`Unable to open browser automatically: ${error.message}`);
+      console.warn(`Open this URL manually: ${url}`);
+    });
   }
 }
 
