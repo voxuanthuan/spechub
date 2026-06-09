@@ -16,22 +16,16 @@ It indexes local repositories and agent folders, groups documents by repository,
 
 ## Quick Start: Browser Dashboard
 
-Install dependencies:
+Install SpecHub:
 
 ```sh
-pnpm install
-```
-
-Build the browser UI and server:
-
-```sh
-pnpm build
+curl -fsSL https://raw.githubusercontent.com/voxuanthuan/spechub/main/install.sh | sh
 ```
 
 Open SpecHub in your browser:
 
 ```sh
-./dist/src/cli.js --open
+spechub --open
 ```
 
 The command prints a local URL such as:
@@ -45,12 +39,6 @@ SpecHub only serves a local dashboard from your machine. Your documents stay on 
 ## Scan Specific Folders
 
 By default, SpecHub scans common workspace locations. To choose folders explicitly:
-
-```sh
-./dist/src/cli.js --roots ~/workspace ~/projects --open
-```
-
-After linking or installing the package, you can use the binary name:
 
 ```sh
 spechub --roots ~/workspace ~/projects --open
@@ -183,6 +171,21 @@ The browser dashboard is exported with Next.js into `out/`. The Express server s
 - `Esc`: close full view.
 
 ## Development
+
+Install from a cloned checkout:
+
+```sh
+pnpm install
+pnpm build
+pnpm link --global
+spechub --open
+```
+
+You can also run the installer from the checkout:
+
+```sh
+./install.sh
+```
 
 Run the browser dashboard during development:
 
