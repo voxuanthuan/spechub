@@ -187,6 +187,33 @@ describe("scanDocuments", () => {
     });
   });
 
+  it("indexes workspace-local Claude plans outside discovered repositories", async () => {
+    const root = await fixtureRoot();
+    const workspace = path.join(root, "workspace");
+    const work = path.join(workspace, "work");
+    const repo = path.join(work, "b2b-app");
+    const claudePlans = path.join(work, ".claude", "plans");
+    const planPath = path.join(claudePlans, "abundant-noodling-pizza.md");
+
+    await mkdir(repo, { recursive: true });
+    await mkdir(claudePlans, { recursive: true });
+    await writeFile(path.join(repo, "package.json"), "{}");
+    await writeFile(
+      planPath,
+      "# Plan: Port split debtor/seller global search\n\nApply this in b2b-app using the existing search-box files.\n"
+    );
+
+    const docs = await scanDocuments({ roots: [workspace] });
+    const plan = docs.find((doc) => doc.absolutePath === planPath);
+
+    expect(plan).toMatchObject({
+      title: "Plan: Port split debtor/seller global search",
+      sourceName: "claude",
+      relativePath: "plans/abundant-noodling-pizza.md",
+      category: "plan"
+    });
+  });
+
   it("includes common agent folders in the default source list", () => {
     const sourceByName = new Map(defaultConfig().sources.map((source) => [source.name, source]));
 

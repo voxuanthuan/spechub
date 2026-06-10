@@ -7,6 +7,7 @@ import { scanOpenCodePlanSource } from "./opencode.js";
 import type { DocumentCategory, DocumentKind, DocumentMeta, SpecHubConfig, SpecHubSource } from "./types.js";
 
 const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"]);
+const LOCAL_AGENT_DISCOVERY_DEPTH = 6;
 
 interface RepoHint {
   root: string;
@@ -23,7 +24,7 @@ export async function scanDocuments(config: Partial<SpecHubConfig> = {}): Promis
     docPatterns: config.docPatterns ?? defaults.docPatterns,
     titleOverrides: config.titleOverrides ?? defaults.titleOverrides
   };
-  const sources = config.sources ?? (
+  const sources: SpecHubSource[] = config.sources ?? (
     config.roots || config.docPatterns
       ? [
           {
@@ -36,12 +37,22 @@ export async function scanDocuments(config: Partial<SpecHubConfig> = {}): Promis
       : defaults.sources
   );
   const repoHints = await createRepoHints(resolved.roots, resolved.ignorePatterns);
+  const localAgentSources = sources.some((source) => source.mode === "repositories")
+    ? await discoverLocalAgentSources(resolved.roots, resolved.ignorePatterns, defaults.sources, sources)
+    : [];
   const docs = await Promise.all(
-    sources.map((source) => scanSource(source, resolved.ignorePatterns, resolved.titleOverrides, repoHints))
+    [...sources, ...localAgentSources].map((source) =>
+      scanSource(source, resolved.ignorePatterns, resolved.titleOverrides, repoHints)
+    )
   );
 
-  return docs
-    .flat()
+  const uniqueDocs = new Map<string, DocumentMeta>();
+  for (const doc of docs.flat()) {
+    const key = path.resolve(doc.absolutePath);
+    if (!uniqueDocs.has(key)) uniqueDocs.set(key, doc);
+  }
+
+  return [...uniqueDocs.values()]
     .sort((left, right) => right.mtimeMs - left.mtimeMs || left.repoName.localeCompare(right.repoName) || left.relativePath.localeCompare(right.relativePath));
 }
 
@@ -96,6 +107,81 @@ async function createRepoHints(roots: string[], ignorePatterns: string[]): Promi
     root: normalizePath(path.resolve(root)),
     name: path.basename(root)
   }));
+}
+
+async function discoverLocalAgentSources(
+  roots: string[],
+  ignorePatterns: string[],
+  sourceTemplates: SpecHubSource[],
+  configuredSources: SpecHubSource[]
+): Promise<SpecHubSource[]> {
+  const directTemplates = sourceTemplates.filter((source) => source.mode === "direct");
+  const templateByDirectory = new Map(directTemplates.map((source) => [`.${source.name}`, source]));
+  const existingDirectRoots = new Set(
+    configuredSources
+      .filter((source) => source.mode === "direct")
+      .flatMap((source) => source.roots.map((root) => path.resolve(root)))
+  );
+  const discovered = await discoverLocalAgentRoots(roots, templateByDirectory, ignorePatterns);
+
+  return directTemplates.flatMap((template) => {
+    const localRoots = [...(discovered.get(template.name) ?? [])]
+      .map((root) => path.resolve(root))
+      .filter((root) => !existingDirectRoots.has(root))
+      .sort();
+
+    if (localRoots.length === 0) return [];
+    return [{ ...template, roots: localRoots }];
+  });
+}
+
+async function discoverLocalAgentRoots(
+  roots: string[],
+  templateByDirectory: Map<string, SpecHubSource>,
+  ignorePatterns: string[]
+): Promise<Map<string, Set<string>>> {
+  const discovered = new Map<string, Set<string>>();
+
+  async function walk(directory: string, scanRoot: string, depth: number): Promise<void> {
+    if (depth > LOCAL_AGENT_DISCOVERY_DEPTH) return;
+    const relative = path.relative(scanRoot, directory);
+    if (relative && isIgnored(relative, ignorePatterns)) return;
+
+    let entries;
+    try {
+      entries = await readdir(directory, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    await Promise.all(
+      entries
+        .filter((entry) => entry.isDirectory())
+        .map(async (entry) => {
+          const template = templateByDirectory.get(entry.name);
+          const child = path.join(directory, entry.name);
+
+          if (template) {
+            const sourceRoots = discovered.get(template.name) ?? new Set<string>();
+            sourceRoots.add(child);
+            discovered.set(template.name, sourceRoots);
+            return;
+          }
+
+          await walk(child, scanRoot, depth + 1);
+        })
+    );
+  }
+
+  await Promise.all(
+    roots.map(async (root) => {
+      const scanRoot = path.resolve(root);
+      if (!(await pathExists(scanRoot))) return;
+      await walk(scanRoot, scanRoot, 0);
+    })
+  );
+
+  return discovered;
 }
 
 export async function discoverRepositoryRoots(roots: string[], ignorePatterns: string[]): Promise<string[]> {
