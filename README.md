@@ -1,16 +1,24 @@
 # SpecHub
 
 **A local dashboard for the specs, plans, and HTML reports your AI agents leave across your machine.**
+*Inspired by [The Unreasonable Effectiveness of HTML](https://thariqs.github.io/html-effectiveness/).*
 
 SpecHub scans your workspaces, groups agent output by repository, renders Markdown safely, previews HTML artifacts, and lets you jump back to the original file. No upload. No hosted account. Just a fast local index for agent-driven work.
 
 ![SpecHub dashboard](.github/assets/spechub-dashboard.png)
+
+## Inspired by *The Unreasonable Effectiveness of HTML*
+
+[thariqs.github.io/html-effectiveness](https://thariqs.github.io/html-effectiveness/) argues that AI agents should ship `.html` files — annotated diffs, status reports, design swatches, slide decks, post-mortem timelines — instead of long Markdown. HTML is the medium your browser, design system, and prototypes already live in, so the artifact is also the rendering.
+
+SpecHub is built on the same premise. It indexes both `.md` and `.html` artifacts your agents produce and renders them in one local dashboard. Tell your agent "ship an HTML report" or "ship a Markdown spec" — SpecHub finds it either way.
 
 ## Why Use It
 
 - Find specs and implementation plans across many repos without remembering where an agent saved them.
 - Read Markdown and sandboxed HTML reports in one browser UI.
 - Filter by repo, type, path, date, and text when your agent output gets noisy.
+- Renders HTML reports your agents ship — not just Markdown — because HTML is the most effective artifact an agent can produce.
 - Keep everything local on disk.
 
 ## Install
