@@ -27,6 +27,14 @@ SpecHub is built on the same premise. It indexes both `.md` and `.html` artifact
 curl -fsSL https://raw.githubusercontent.com/voxuanthuan/spechub/main/install.sh | sh
 ```
 
+## Update
+
+Once installed, pull the latest version and rebuild in place — no need to re-run the install script:
+
+```sh
+spechub update
+```
+
 ## Use
 
 ```sh
