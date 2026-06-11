@@ -68,7 +68,9 @@ ensure_pnpm
 cd "$SPECHUB_DIR"
 
 log "Installing dependencies..."
-pnpm install --frozen-lockfile
+# Run non-interactively: when an existing node_modules must be recreated, pnpm
+# otherwise prompts to confirm the purge and aborts with no TTY (piped installs).
+CI=true pnpm install --frozen-lockfile
 
 log "Building SpecHub..."
 pnpm build
