@@ -163,7 +163,27 @@ export async function readConfigFile(configPath: string): Promise<Partial<SpecHu
     return {};
   }
   const raw = await readFile(resolvedPath, "utf8");
-  return JSON.parse(raw) as Partial<SpecHubConfig>;
+  try {
+    return JSON.parse(raw) as Partial<SpecHubConfig>;
+  } catch (error) {
+    console.warn(`SpecHub config could not be parsed: ${resolvedPath}`, error);
+    return {};
+  }
+}
+
+export async function describeConfigFileProblem(configPath: string): Promise<string | null> {
+  const resolvedPath = expandHome(configPath);
+  try {
+    await access(resolvedPath);
+  } catch {
+    return null;
+  }
+  try {
+    JSON.parse(await readFile(resolvedPath, "utf8"));
+    return null;
+  } catch {
+    return `Config file could not be parsed: ${resolvedPath}. Defaults are being used until the file is fixed.`;
+  }
 }
 
 export async function loadConfig(configPath = DEFAULT_CONFIG_PATH): Promise<Partial<SpecHubConfig>> {
@@ -193,18 +213,26 @@ export function normalizeRoots(roots: readonly string[]): string[] {
   return result;
 }
 
+export async function mutateJsonFile<T>(
+  filePath: string,
+  readExisting: () => Promise<T>,
+  mutator: (existing: T) => T | Promise<T>
+): Promise<T> {
+  const resolvedPath = expandHome(filePath);
+  const existing = await readExisting();
+  const next = mutator(existing);
+  await mkdir(path.dirname(resolvedPath), { recursive: true });
+  const tempPath = `${resolvedPath}.tmp`;
+  await writeFile(tempPath, `${JSON.stringify(await next, null, 2)}\n`, "utf8");
+  await rename(tempPath, resolvedPath);
+  return next;
+}
+
 async function mutateConfigFile(
   configPath: string,
   mutator: (existing: Partial<SpecHubConfig>) => Partial<SpecHubConfig>
 ): Promise<Partial<SpecHubConfig>> {
-  const resolvedPath = expandHome(configPath);
-  const existing = await readConfigFile(configPath);
-  const next = mutator(existing);
-  await mkdir(path.dirname(resolvedPath), { recursive: true });
-  const tempPath = `${resolvedPath}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(next, null, 2)}\n`, "utf8");
-  await rename(tempPath, resolvedPath);
-  return next;
+  return mutateJsonFile(configPath, () => readConfigFile(configPath), mutator);
 }
 
 export async function updateTitleOverride(configPath: string, absolutePath: string, title: string): Promise<void> {
@@ -247,6 +275,7 @@ export async function resolveConfig(options: {
 
   const roots = (options.roots?.length ? options.roots : fileConfig.roots ?? base.roots).map(expandHome);
   const docPatterns = mergeDefaultDocPatterns(fileConfig.docPatterns ?? base.docPatterns);
+  const restrictAgentStorageToRoots = Boolean(options.roots?.length) || Boolean(fileConfig.roots?.length);
 
   return {
     roots,
@@ -260,6 +289,7 @@ export async function resolveConfig(options: {
       },
       base
     ),
-    titleOverrides: normalizeTitleOverrides(fileConfig.titleOverrides)
+    titleOverrides: normalizeTitleOverrides(fileConfig.titleOverrides),
+    restrictAgentStorageToRoots
   };
 }

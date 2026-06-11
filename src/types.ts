@@ -21,9 +21,18 @@ export interface SpecHubConfig {
   docPatterns: string[];
   sources: SpecHubSource[];
   titleOverrides: Record<string, string>;
+  /**
+   * When true, docs from agent storage outside the configured roots are filtered
+   * to those belonging to a repo under `roots`. Runtime-only; not persisted to config.json.
+   */
+  restrictAgentStorageToRoots?: boolean;
 }
 
-export type RuntimeSpecHubConfig = Partial<SpecHubConfig> & { configPath?: string; explicitRoots?: boolean };
+export type RuntimeSpecHubConfig = Partial<SpecHubConfig> & {
+  configPath?: string;
+  explicitRoots?: boolean;
+  statePath?: string;
+};
 
 export interface DocumentMeta {
   id: string;

@@ -77,4 +77,69 @@ describe("dashboard document filters", () => {
     expect(page.filterDocs(docs, { repo: "hidden", query: "", category: "all", date: "all", path: "", hiddenRepos: ["hidden"] }).map((doc) => doc.id)).toEqual(["hidden-1"]);
     expect(page.filterDocs(docs, { repo: "all", query: "", category: "all", date: "all", path: "", hiddenRepos: [] })).toHaveLength(2);
   });
+
+  it("filters by favorites and tags using absolute paths", async () => {
+    const page = await import("../app/page.js");
+    const docs = [
+      {
+        id: "a",
+        title: "API Design",
+        kind: "markdown",
+        category: "spec",
+        sourceTitle: "API Design",
+        sourceName: "design.md",
+        absolutePath: "/workspace/repo/docs/api.md",
+        relativePath: "docs/api.md",
+        repoName: "repo",
+        repoRoot: "/workspace/repo",
+        modifiedAt: "2026-06-08T00:00:00.000Z",
+        mtimeMs: Date.now(),
+        sizeBytes: 10
+      },
+      {
+        id: "b",
+        title: "Migration Plan",
+        kind: "markdown",
+        category: "plan",
+        sourceTitle: "Migration Plan",
+        sourceName: "plan.md",
+        absolutePath: "/workspace/repo/docs/migration.md",
+        relativePath: "docs/migration.md",
+        repoName: "repo",
+        repoRoot: "/workspace/repo",
+        modifiedAt: "2026-06-08T00:00:00.000Z",
+        mtimeMs: Date.now(),
+        sizeBytes: 10
+      }
+    ] satisfies Parameters<typeof page.filterDocs>[0];
+    const state = {
+      favorites: ["/workspace/repo/docs/migration.md"],
+      tags: {
+        "/workspace/repo/docs/api.md": ["api", "backend"],
+        "/workspace/repo/docs/migration.md": ["release"]
+      },
+      hiddenRepos: []
+    };
+
+    expect(page.filterDocs(docs, {
+      repo: "all",
+      query: "",
+      category: "all",
+      date: "all",
+      path: "",
+      state,
+      favoritesOnly: true,
+      tag: "all"
+    }).map((doc) => doc.id)).toEqual(["b"]);
+    expect(page.filterDocs(docs, {
+      repo: "all",
+      query: "",
+      category: "all",
+      date: "all",
+      path: "",
+      state,
+      favoritesOnly: false,
+      tag: "backend"
+    }).map((doc) => doc.id)).toEqual(["a"]);
+  });
 });

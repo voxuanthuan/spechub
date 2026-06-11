@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import express, { type Express, type Request, type Response } from "express";
 import {
   DEFAULT_CONFIG_PATH,
+  describeConfigFileProblem,
   expandHome,
   readConfigFile,
   resolveConfig,
@@ -14,14 +15,15 @@ import {
 import { renderMarkdown } from "./markdown.js";
 import { readOpenCodePlanContent } from "./opencode.js";
 import { openLocalPath } from "./opener.js";
-import { scanDocuments } from "./scanner.js";
+import { createDocumentIndex, type DocumentIndex } from "./index-service.js";
+import { DEFAULT_STATE_PATH, parseStatePatch, readStateFile, updateStateFile } from "./state.js";
 import type { DocumentMeta, RuntimeSpecHubConfig, SpecHubConfig } from "./types.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
 const legacyWebDir = path.join(moduleDir, "web");
 const nextOutDirs = [path.resolve(moduleDir, "..", "out"), path.resolve(moduleDir, "..", "..", "out")];
 
-export function createApp(config: RuntimeSpecHubConfig = {}): Express {
+export function createApp(config: RuntimeSpecHubConfig = {}, index: DocumentIndex = createDocumentIndex(config)): Express {
   const app = express();
   app.disable("x-powered-by");
   app.use(express.json());
@@ -35,8 +37,8 @@ export function createApp(config: RuntimeSpecHubConfig = {}): Express {
   }
   app.use("/assets", express.static(legacyWebDir, { fallthrough: false }));
 
-  app.get("/api/docs", asyncRoute(async (_request, response) => {
-    const docs = await scanDocuments(await currentConfig(config));
+  app.get("/api/docs", asyncRoute(async (request, response) => {
+    const docs = request.query.refresh === "1" ? await index.refresh() : await index.getDocs();
     response.json({
       docs,
       repos: summarizeRepos(docs)
@@ -44,7 +46,7 @@ export function createApp(config: RuntimeSpecHubConfig = {}): Express {
   }));
 
   app.get("/api/docs/:id", asyncRoute(async (request, response) => {
-    const doc = await findDocument(await currentConfig(config), request.params.id);
+    const doc = await index.findById(request.params.id);
     if (!doc) {
       notFound(response);
       return;
@@ -70,7 +72,7 @@ export function createApp(config: RuntimeSpecHubConfig = {}): Express {
   }));
 
   app.get("/raw/:id", asyncRoute(async (request, response) => {
-    const doc = await findDocument(await currentConfig(config), request.params.id);
+    const doc = await index.findById(request.params.id);
     if (!doc) {
       notFound(response);
       return;
@@ -81,7 +83,7 @@ export function createApp(config: RuntimeSpecHubConfig = {}): Express {
   }));
 
   app.post("/api/docs/:id/open-source", asyncRoute(async (request, response) => {
-    const doc = await findDocument(await currentConfig(config), request.params.id);
+    const doc = await index.findById(request.params.id);
     if (!doc) {
       notFound(response);
       return;
@@ -91,7 +93,7 @@ export function createApp(config: RuntimeSpecHubConfig = {}): Express {
   }));
 
   app.patch("/api/docs/:id/title", asyncRoute(async (request, response) => {
-    const doc = await findDocument(await currentConfig(config), request.params.id);
+    const doc = await index.findById(request.params.id);
     if (!doc) {
       notFound(response);
       return;
@@ -99,12 +101,28 @@ export function createApp(config: RuntimeSpecHubConfig = {}): Express {
 
     const title = typeof request.body?.title === "string" ? request.body.title : "";
     await updateTitleOverride(config.configPath ?? DEFAULT_CONFIG_PATH, doc.absolutePath, title);
-    const updated = await findDocument(await currentConfig(config), request.params.id);
+    await index.refresh();
+    const updated = await index.findById(request.params.id);
     response.json({ doc: updated ?? doc });
   }));
 
   app.get("/api/config", asyncRoute(async (_request, response) => {
     response.json(await describeConfig(config));
+  }));
+
+  app.get("/api/state", asyncRoute(async (_request, response) => {
+    response.json(await readStateFile(config.statePath ?? DEFAULT_STATE_PATH));
+  }));
+
+  app.patch("/api/state", asyncRoute(async (request, response) => {
+    let patch;
+    try {
+      patch = parseStatePatch(request.body);
+    } catch (error) {
+      response.status(400).json({ error: error instanceof Error ? error.message : "Invalid state payload." });
+      return;
+    }
+    response.json(await updateStateFile(config.statePath ?? DEFAULT_STATE_PATH, patch));
   }));
 
   app.patch("/api/config/roots", asyncRoute(async (request, response) => {
@@ -119,11 +137,12 @@ export function createApp(config: RuntimeSpecHubConfig = {}): Express {
       response.status(400).json({ error: error instanceof Error ? error.message : "Invalid roots." });
       return;
     }
+    await index.refresh();
     response.json(await describeConfig(config));
   }));
 
   app.post("/api/docs/:id/open-folder", asyncRoute(async (request, response) => {
-    const doc = await findDocument(await currentConfig(config), request.params.id);
+    const doc = await index.findById(request.params.id);
     if (!doc) {
       notFound(response);
       return;
@@ -131,6 +150,28 @@ export function createApp(config: RuntimeSpecHubConfig = {}): Express {
     await openLocalPath(path.dirname(sourcePath(doc)));
     response.json({ ok: true });
   }));
+
+  app.get("/api/events", (request, response) => {
+    response.status(200);
+    response.setHeader("Content-Type", "text/event-stream");
+    response.setHeader("Cache-Control", "no-cache, no-transform");
+    response.setHeader("Connection", "keep-alive");
+    response.flushHeaders();
+    response.write("event: hello\ndata: {}\n\n");
+
+    const onDocsChanged = (event: { version: number }) => {
+      response.write(`event: docs-changed\ndata: ${JSON.stringify(event)}\n\n`);
+    };
+    const heartbeat = setInterval(() => {
+      response.write(": heartbeat\n\n");
+    }, 25_000);
+
+    index.events.on("docs-changed", onDocsChanged);
+    request.on("close", () => {
+      clearInterval(heartbeat);
+      index.events.off("docs-changed", onDocsChanged);
+    });
+  });
 
   app.use((_request, response) => notFound(response));
 
@@ -151,11 +192,16 @@ async function dashboardIndexPath(): Promise<string> {
 }
 
 export async function startServer(config: RuntimeSpecHubConfig = {}, port = 0): Promise<{ server: Server; url: string; port: number }> {
-  const app = createApp(config);
+  const index = createDocumentIndex(config);
+  const app = createApp(config, index);
   const server = createServer(app);
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
     server.listen(port, "127.0.0.1", () => resolve());
+  });
+  await index.startWatching();
+  server.on("close", () => {
+    void index.close();
   });
 
   const address = server.address();
@@ -204,15 +250,12 @@ async function describeConfig(config: RuntimeSpecHubConfig): Promise<{
     })
   );
   const warnings: string[] = [];
+  const configProblem = await describeConfigFileProblem(configPath);
+  if (configProblem) warnings.push(configProblem);
   if (explicitRoots) {
     warnings.push("Server was started with --roots; saved roots take effect on next launch.");
   }
   return { configPath, roots, explicitRoots, warnings };
-}
-
-async function findDocument(config: Partial<SpecHubConfig>, id: string): Promise<DocumentMeta | undefined> {
-  const docs = await scanDocuments(config);
-  return docs.find((doc) => doc.id === id);
 }
 
 async function readDocumentContent(doc: DocumentMeta): Promise<string> {

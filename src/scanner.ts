@@ -52,7 +52,11 @@ export async function scanDocuments(config: Partial<SpecHubConfig> = {}): Promis
     if (!uniqueDocs.has(key)) uniqueDocs.set(key, doc);
   }
 
-  return [...uniqueDocs.values()]
+  const scopedDocs = config.restrictAgentStorageToRoots
+    ? [...uniqueDocs.values()].filter((doc) => isWithinRootScope(doc, resolved.roots, repoHints))
+    : [...uniqueDocs.values()];
+
+  return scopedDocs
     .sort((left, right) => right.mtimeMs - left.mtimeMs || left.repoName.localeCompare(right.repoName) || left.relativePath.localeCompare(right.relativePath));
 }
 
@@ -297,6 +301,17 @@ async function createDocumentMeta(
   }
 }
 
+function isWithinRootScope(doc: DocumentMeta, roots: string[], repoHints: RepoHint[]): boolean {
+  const rootPaths = roots.map((root) => normalizePath(path.resolve(root)));
+  const isUnderRoots = (candidate: string): boolean => {
+    const normalized = normalizePath(path.resolve(candidate));
+    return rootPaths.some((root) => normalized === root || normalized.startsWith(`${root}/`));
+  };
+
+  if (isUnderRoots(doc.absolutePath) || isUnderRoots(doc.repoRoot)) return true;
+  return repoHints.some((hint) => hint.name === doc.repoName);
+}
+
 function findRepoByPath(absolutePath: string, repoHints: RepoHint[]): RepoHint | undefined {
   if (repoHints.length === 0) return undefined;
   const normalized = normalizePath(path.resolve(absolutePath));
@@ -329,7 +344,7 @@ function extractTitle(raw: string, relativePath: string, kind: DocumentKind): st
     if (h1?.[1]) return cleanTitle(stripTags(h1[1]));
   }
 
-  return path.basename(relativePath, path.extname(relativePath)).replace(/[-_]+/g, " ");
+  return titleCaseSlug(path.basename(relativePath, path.extname(relativePath)));
 }
 
 function inferCategory(relativePath: string): DocumentCategory {
@@ -350,6 +365,17 @@ function cleanTitle(input: string): string {
 
 function stripTags(input: string): string {
   return input.replace(/<[^>]*>/g, "");
+}
+
+function titleCaseSlug(input: string): string {
+  return input
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .split(" ")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
 }
 
 function toFastGlobIgnore(ignorePatterns: string[]): string[] {

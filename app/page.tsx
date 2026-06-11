@@ -2,7 +2,7 @@
 
 import DOMPurify from "dompurify";
 import { marked } from "marked";
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import {
   filterPromptCards,
   promptCards,
@@ -16,7 +16,7 @@ import {
 type DocumentKind = "markdown" | "html";
 type DocumentCategory = "plan" | "spec" | "superpowers" | "doc";
 type CategoryFilter = DocumentCategory | "all";
-type DateFilter = "all" | "7" | "30" | "90";
+type DateFilter = "all" | "1" | "3" | "7" | "30";
 type Accent = "Green" | "Blue" | "Violet" | "Amber";
 type Density = "compact" | "regular" | "comfy";
 type ActiveView = "documents" | "prompts";
@@ -66,6 +66,12 @@ interface DocumentDetail extends DocumentMeta {
 interface DocumentPayload {
   docs: DocumentMeta[];
   repos: Array<{ name: string; count: number }>;
+}
+
+interface SpecHubState {
+  favorites: string[];
+  tags: Record<string, string[]>;
+  hiddenRepos: string[];
 }
 
 interface AccentTokens {
@@ -123,9 +129,14 @@ export default function Home() {
   const [docs, setDocs] = useState<DocumentMeta[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [selectedDoc, setSelectedDoc] = useState<DocumentDetail | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [repo, setRepo] = useState("all");
   const [hiddenRepos, setHiddenRepos] = useState<string[]>(() => readStoredHiddenRepos());
   const [hiddenReposExpanded, setHiddenReposExpanded] = useState(false);
+  const [appState, setAppState] = useState<SpecHubState>(() => emptySpecHubState(readStoredHiddenRepos()));
+  const [favoritesOnly, setFavoritesOnly] = useState(false);
+  const [tag, setTag] = useState("all");
+  const [tagDraft, setTagDraft] = useState("");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<CategoryFilter>("all");
   const [date, setDate] = useState<DateFilter>("all");
@@ -136,6 +147,7 @@ export default function Home() {
   const [editingTitle, setEditingTitle] = useState(false);
   const [draftTitle, setDraftTitle] = useState("");
   const [copyState, setCopyState] = useState("Copy path");
+  const [menuOpen, setMenuOpen] = useState(false);
   const [dark, setDark] = useState(false);
   const [accent, setAccent] = useState<Accent>("Green");
   const [density, setDensity] = useState<Density>("regular");
@@ -152,7 +164,16 @@ export default function Home() {
   const [addRootDraft, setAddRootDraft] = useState("");
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [liveUpdatedAt, setLiveUpdatedAt] = useState<number | null>(null);
+  const [livePulse, setLivePulse] = useState(false);
+  const [toast, setToast] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const livePulseTimer = useRef<number | null>(null);
+  const toastTimer = useRef<number | null>(null);
+  const fullViewCloseRef = useRef<HTMLButtonElement>(null);
+  const settingsCloseRef = useRef<HTMLButtonElement>(null);
+  const filteredDocsRef = useRef<DocumentMeta[]>([]);
 
   useEffect(() => {
     setActiveView(readStoredView());
@@ -162,7 +183,44 @@ export default function Home() {
     setDensity(readStoredDensity());
     setIsTauri(isDesktop());
     void loadDocs();
+    if (!isDesktop()) void loadState();
   }, []);
+
+  useEffect(() => {
+    if (isDesktop() || typeof EventSource === "undefined") return;
+    const source = new EventSource("/api/events");
+    source.addEventListener("docs-changed", () => {
+      void loadDocs({ quiet: true });
+    });
+    return () => source.close();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (livePulseTimer.current) window.clearTimeout(livePulseTimer.current);
+      if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+
+    function closeOnPointerDown(event: PointerEvent) {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setMenuOpen(false);
+    }
+
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === "Escape") setMenuOpen(false);
+    }
+
+    document.addEventListener("pointerdown", closeOnPointerDown);
+    document.addEventListener("keydown", closeOnEscape);
+    return () => {
+      document.removeEventListener("pointerdown", closeOnPointerDown);
+      document.removeEventListener("keydown", closeOnEscape);
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     window.localStorage.setItem("spechub:hidden-repos", JSON.stringify(hiddenRepos));
@@ -198,6 +256,7 @@ export default function Home() {
     setDraftTitle(selectedDoc?.title ?? "");
     setEditingTitle(false);
     setCopyState("Copy path");
+    setMenuOpen(false);
   }, [selectedDoc?.id, selectedDoc?.title]);
 
   useEffect(() => {
@@ -217,6 +276,27 @@ export default function Home() {
         event.preventDefault();
         searchRef.current?.focus();
       }
+      const currentFilteredDocs = filteredDocsRef.current;
+      if (activeView === "documents" && !fullView && !settingsOpen && currentFilteredDocs.length > 0) {
+        if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+          event.preventDefault();
+          const currentIndex = Math.max(0, currentFilteredDocs.findIndex((doc) => doc.id === selectedId));
+          const nextIndex = event.key === "ArrowDown"
+            ? Math.min(currentFilteredDocs.length - 1, currentIndex + 1)
+            : Math.max(0, currentIndex - 1);
+          const nextId = currentFilteredDocs[nextIndex]?.id;
+          if (nextId) {
+            setSelectedId(nextId);
+            window.requestAnimationFrame(() => {
+              document.querySelector(`[data-doc-id="${nextId}"]`)?.scrollIntoView({ block: "nearest" });
+            });
+          }
+        }
+        if (event.key === "Enter" && selectedDoc) {
+          event.preventDefault();
+          setFullView(true);
+        }
+      }
       if ((event.key === "f" || event.key === "F") && activeView === "documents" && selectedDoc) {
         event.preventDefault();
         setFullView(true);
@@ -225,7 +305,10 @@ export default function Home() {
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [activeView, fullView, selectedDoc, settingsOpen]);
+  }, [activeView, fullView, selectedDoc, selectedId, settingsOpen]);
+
+  useFocusTrap(fullView, fullViewCloseRef);
+  useFocusTrap(settingsOpen, settingsCloseRef);
 
   useEffect(() => {
     document.body.style.overflow = fullView || settingsOpen ? "hidden" : "";
@@ -235,23 +318,38 @@ export default function Home() {
   }, [fullView, settingsOpen]);
 
   const repos = useMemo(() => summarizeRepos(docs), [docs]);
+  const deferredQuery = useDeferredValue(query);
+  const deferredPromptQuery = useDeferredValue(promptQuery);
   const hiddenRepoSet = useMemo(() => new Set(hiddenRepos), [hiddenRepos]);
   const visibleRepos = useMemo(() => repos.filter((item) => !hiddenRepoSet.has(item.name)), [hiddenRepoSet, repos]);
   const hiddenRepoSummaries = useMemo(() => repos.filter((item) => hiddenRepoSet.has(item.name)), [hiddenRepoSet, repos]);
   const visibleDocCount = useMemo(() => docs.filter((doc) => !hiddenRepoSet.has(doc.repoName)).length, [docs, hiddenRepoSet]);
-  const filteredDocs = useMemo(
-    () => filterDocs(docs, { repo, query, category, date, path, hiddenRepos }),
-    [category, date, docs, hiddenRepos, path, query, repo]
+  const favoriteSet = useMemo(() => new Set(appState.favorites), [appState.favorites]);
+  const favoriteCount = useMemo(
+    () => docs.filter((doc) => favoriteSet.has(doc.absolutePath) && !hiddenRepoSet.has(doc.repoName)).length,
+    [docs, favoriteSet, hiddenRepoSet]
   );
+  const tagOptions = useMemo(() => {
+    const tags = new Set<string>();
+    Object.values(appState.tags).forEach((items) => items.forEach((item) => tags.add(item)));
+    return [...tags].sort((left, right) => left.localeCompare(right));
+  }, [appState.tags]);
+  const filteredDocs = useMemo(
+    () => filterDocs(docs, { repo, query: deferredQuery, category, date, path, hiddenRepos, state: appState, favoritesOnly, tag }),
+    [appState, category, date, deferredQuery, docs, favoritesOnly, hiddenRepos, path, repo, tag]
+  );
+  filteredDocsRef.current = filteredDocs;
   const promptCategorySummaries = useMemo(() => summarizePromptCategories(promptCards), []);
   const filteredPrompts = useMemo(
-    () => filterPromptCards(promptCards, { category: promptCategory, query: promptQuery, tag: promptTag }),
-    [promptCategory, promptQuery, promptTag]
+    () => filterPromptCards(promptCards, { category: promptCategory, query: deferredPromptQuery, tag: promptTag }),
+    [deferredPromptQuery, promptCategory, promptTag]
   );
   const selectedPrompt = useMemo(
     () => promptCards.find((card) => card.id === selectedPromptId) ?? filteredPrompts[0] ?? promptCards[0],
     [filteredPrompts, selectedPromptId]
   );
+  const selectedDocTags = selectedDoc ? appState.tags[selectedDoc.absolutePath] ?? [] : [];
+  const selectedDocIsFavorite = Boolean(selectedDoc && favoriteSet.has(selectedDoc.absolutePath));
 
   useEffect(() => {
     if (!filteredPrompts.some((card) => card.id === selectedPromptId)) {
@@ -265,18 +363,26 @@ export default function Home() {
     }
   }, [filteredDocs, hiddenRepoSet, repo, selectedDoc]);
 
-  async function loadDocs() {
-    setSummary("Indexing local files...");
-    setError(null);
+  async function loadDocs(options: { quiet?: boolean; force?: boolean } = {}) {
+    if (!options.quiet) {
+      setSummary("Indexing local files...");
+      setError(null);
+    }
     try {
-      const payload = await fetchDocs();
+      const payload = await fetchDocs(options.force);
       setDocs(payload.docs);
       setSelectedId((current) => {
         if (current && payload.docs.some((doc) => doc.id === current)) return current;
         return payload.docs[0]?.id ?? null;
       });
       setSummary(`${payload.docs.length} documents indexed`);
+      markLiveUpdated();
+      if (options.force) showToast("Index refreshed");
     } catch (reason) {
+      if (options.quiet) {
+        setError(reason instanceof Error ? reason.message : "Unable to refresh local files.");
+        return;
+      }
       setDocs([]);
       setSelectedId(null);
       setSelectedDoc(null);
@@ -285,13 +391,45 @@ export default function Home() {
     }
   }
 
+  async function loadState() {
+    try {
+      const state = await fetchState();
+      const storedHidden = readStoredHiddenRepos();
+      if (
+        state.hiddenRepos.length === 0
+        && storedHidden.length > 0
+        && window.localStorage.getItem("spechub:hidden-repos:migrated") !== "true"
+      ) {
+        const migrated = await patchState({ hiddenRepos: storedHidden });
+        setAppState(migrated);
+        setHiddenRepos(migrated.hiddenRepos);
+        window.localStorage.setItem("spechub:hidden-repos:migrated", "true");
+        return;
+      }
+      setAppState(state);
+      setHiddenRepos(state.hiddenRepos);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Unable to load dashboard state.");
+    }
+  }
+
+  function markLiveUpdated() {
+    setLiveUpdatedAt(Date.now());
+    setLivePulse(true);
+    if (livePulseTimer.current) window.clearTimeout(livePulseTimer.current);
+    livePulseTimer.current = window.setTimeout(() => setLivePulse(false), 1500);
+  }
+
   async function showDetail(id: string) {
+    setDetailLoading(true);
     try {
       const doc = await fetchDocument(id);
       setSelectedDoc(doc);
     } catch {
       setSelectedDoc(null);
       setError("Document no longer exists. Refresh the index to remove stale entries.");
+    } finally {
+      setDetailLoading(false);
     }
   }
 
@@ -299,6 +437,7 @@ export default function Home() {
     if (!selectedDoc) return;
     await navigator.clipboard.writeText(selectedDoc.absolutePath);
     setCopyState("Copied");
+    showToast("Path copied");
     window.setTimeout(() => setCopyState("Copy path"), 1000);
   }
 
@@ -306,6 +445,7 @@ export default function Home() {
     if (!selectedPrompt) return;
     await navigator.clipboard.writeText(selectedPrompt.sourceUrl);
     setPromptCopyState(true);
+    showToast("Source copied");
     window.setTimeout(() => setPromptCopyState(false), 1000);
   }
 
@@ -339,15 +479,23 @@ export default function Home() {
       setSelectedId(id);
       await showDetail(id);
       setEditingTitle(false);
+      showToast(title.trim() ? "Title saved" : "Title cleared");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Unable to update title.");
     }
+  }
+
+  function showToast(message: string) {
+    setToast(message);
+    if (toastTimer.current) window.clearTimeout(toastTimer.current);
+    toastTimer.current = window.setTimeout(() => setToast(null), 1800);
   }
 
   function hideRepo(name: string) {
     const nextHiddenRepos = normalizeRepoNames([...hiddenRepos, name]);
     const nextHiddenRepoSet = new Set(nextHiddenRepos);
     setHiddenRepos(nextHiddenRepos);
+    commitState({ hiddenRepos: nextHiddenRepos });
     if (repo === name) {
       setRepo("all");
     }
@@ -357,8 +505,67 @@ export default function Home() {
   }
 
   function reopenRepo(name: string) {
-    setHiddenRepos((current) => current.filter((item) => item !== name));
+    const nextHiddenRepos = hiddenRepos.filter((item) => item !== name);
+    setHiddenRepos(nextHiddenRepos);
+    commitState({ hiddenRepos: nextHiddenRepos });
     setRepo(name);
+  }
+
+  function toggleFavorite(doc: DocumentMeta) {
+    const favorites = favoriteSet.has(doc.absolutePath)
+      ? appState.favorites.filter((item) => item !== doc.absolutePath)
+      : normalizeRepoNames([...appState.favorites, doc.absolutePath]);
+    commitState({ favorites });
+  }
+
+  function addSelectedTag() {
+    if (!selectedDoc) return;
+    const trimmed = tagDraft.trim();
+    if (!trimmed) return;
+    const nextTags = normalizeRepoNames([...(appState.tags[selectedDoc.absolutePath] ?? []), trimmed]);
+    saveTags(selectedDoc.absolutePath, nextTags);
+    setTagDraft("");
+  }
+
+  function removeSelectedTag(tagName: string) {
+    if (!selectedDoc) return;
+    saveTags(selectedDoc.absolutePath, (appState.tags[selectedDoc.absolutePath] ?? []).filter((item) => item !== tagName));
+  }
+
+  function saveTags(absolutePath: string, tags: string[]) {
+    const nextTags = { ...appState.tags };
+    const normalized = normalizeRepoNames(tags);
+    if (normalized.length > 0) {
+      nextTags[absolutePath] = normalized;
+    } else {
+      delete nextTags[absolutePath];
+    }
+    commitState({ tags: nextTags });
+  }
+
+  function commitState(patch: Partial<SpecHubState>) {
+    const nextState = normalizeClientState({ ...appState, ...patch });
+    setAppState(nextState);
+    if (patch.hiddenRepos) setHiddenRepos(nextState.hiddenRepos);
+    if (!isDesktop()) {
+      void patchState(patch)
+        .then((saved) => {
+          setAppState(saved);
+          setHiddenRepos(saved.hiddenRepos);
+          showToast("Saved");
+        })
+        .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to save dashboard state."));
+    }
+  }
+
+  function clearDocFilters() {
+    setRepo("all");
+    setFavoritesOnly(false);
+    setTag("all");
+    setQuery("");
+    setCategory("all");
+    setDate("all");
+    setPath("");
   }
 
   async function openSettings() {
@@ -421,7 +628,7 @@ export default function Home() {
       setSettingsInfo(info);
       setDraftRoots(info.roots.map(toDraftRoot));
       setSettingsOpen(false);
-      await loadDocs();
+      await loadDocs({ force: true });
     } catch (reason) {
       setSettingsError(reason instanceof Error ? reason.message : "Unable to save workspace roots.");
     } finally {
@@ -499,6 +706,11 @@ export default function Home() {
                   <span className="dot" />
                   <span className="name">All repos</span>
                   <span className="count">{visibleDocCount}</span>
+                </button>
+                <button className="repo" type="button" aria-selected={favoritesOnly} onClick={() => setFavoritesOnly((current) => !current)}>
+                  <span className="dot star-dot" />
+                  <span className="name">Favorites</span>
+                  <span className="count">{favoriteCount}</span>
                 </button>
                 {visibleRepos.map((item) => (
                   <RepoFilterRow
@@ -583,33 +795,27 @@ export default function Home() {
             {activeView === "documents" ? (
               <>
                 <label className="field">
-                  <span>Type</span>
-                  <span className="select-wrap">
-                    <select value={category} onChange={(event) => setCategory(event.target.value as CategoryFilter)}>
-                      <option value="all">All</option>
-                      <option value="spec">Spec</option>
-                      <option value="plan">Plan</option>
-                      <option value="doc">Doc</option>
-                      <option value="superpowers">Superpowers</option>
-                    </select>
-                    <ChevronIcon />
-                  </span>
-                </label>
-                <label className="field">
                   <span>Date</span>
                   <span className="select-wrap">
                     <select value={date} onChange={(event) => setDate(event.target.value as DateFilter)}>
                       <option value="all">Any time</option>
-                      <option value="7">Last 7 days</option>
-                      <option value="30">Last 30 days</option>
-                      <option value="90">Last 90 days</option>
+                      <option value="1">Today</option>
+                      <option value="3">3 days</option>
+                      <option value="7">7 days</option>
+                      <option value="30">30 days</option>
                     </select>
                     <ChevronIcon />
                   </span>
                 </label>
                 <label className="field">
-                  <span>Path</span>
-                  <input type="text" placeholder="docs/specs" value={path} onChange={(event) => setPath(event.target.value)} />
+                  <span>Tag</span>
+                  <span className="select-wrap">
+                    <select value={tag} onChange={(event) => setTag(event.target.value)}>
+                      <option value="all">All tags</option>
+                      {tagOptions.map((item) => <option key={item} value={item}>{item}</option>)}
+                    </select>
+                    <ChevronIcon />
+                  </span>
                 </label>
               </>
             ) : (
@@ -636,35 +842,8 @@ export default function Home() {
                 </label>
               </>
             )}
-            <label className="field compact-field">
-              <span>Accent</span>
-              <span className="select-wrap">
-                <select value={accent} onChange={(event) => setAccent(event.target.value as Accent)}>
-                  <option>Green</option>
-                  <option>Blue</option>
-                  <option>Violet</option>
-                  <option>Amber</option>
-                </select>
-                <ChevronIcon />
-              </span>
-            </label>
-            <label className="switch-field" title="Toggle dark chrome">
-              <span>Dark</span>
-              <input type="checkbox" checked={dark} onChange={(event) => setDark(event.target.checked)} />
-            </label>
-            <label className="field compact-field">
-              <span>Density</span>
-              <span className="select-wrap">
-                <select value={density} onChange={(event) => setDensity(event.target.value as Density)}>
-                  <option value="compact">Compact</option>
-                  <option value="regular">Regular</option>
-                  <option value="comfy">Comfy</option>
-                </select>
-                <ChevronIcon />
-              </span>
-            </label>
             {activeView === "documents" ? (
-              <button className="icon-btn" type="button" title="Refresh index" aria-label="Refresh index" onClick={loadDocs}>
+              <button className="icon-btn" type="button" title="Refresh index" aria-label="Refresh index" onClick={() => void loadDocs({ force: true })}>
                 <RefreshIcon />
               </button>
             ) : null}
@@ -676,16 +855,43 @@ export default function Home() {
             <h1>{activeView === "documents" ? "Specs & plans" : "Prompt library"}</h1>
             <div className="meta">
               {activeView === "documents"
-                ? error ? error : <><b>{filteredDocs.length}</b> of {docs.length} documents</>
+                ? error ? error : <><span className="live-pill" data-pulse={livePulse}>{liveUpdatedAt ? `Updated ${formatLiveTime(liveUpdatedAt)}` : "Live"}</span><b>{filteredDocs.length}</b> of {docs.length} documents</>
                 : <><b>{filteredPrompts.length}</b> of {promptCards.length} prompts</>}
             </div>
           </div>
           <div className="list-scroll" aria-live="polite">
             {activeView === "documents" ? (
-              filteredDocs.map((doc) => (
-                <button className="doc" key={doc.id} type="button" aria-selected={doc.id === selectedId} onClick={() => setSelectedId(doc.id)}>
+              filteredDocs.length > 0 ? filteredDocs.map((doc) => (
+                <div
+                  className="doc"
+                  key={doc.id}
+                  role="button"
+                  tabIndex={0}
+                  data-doc-id={doc.id}
+                  aria-selected={doc.id === selectedId}
+                  onClick={() => setSelectedId(doc.id)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" || event.key === " ") {
+                      event.preventDefault();
+                      setSelectedId(doc.id);
+                    }
+                  }}
+                >
                   <div className="doc-top">
                     <span className="doc-title">{doc.title}</span>
+                    <button
+                      className="star-btn"
+                      type="button"
+                      title={favoriteSet.has(doc.absolutePath) ? "Remove favorite" : "Add favorite"}
+                      aria-label={favoriteSet.has(doc.absolutePath) ? `Remove ${doc.title} from favorites` : `Add ${doc.title} to favorites`}
+                      aria-pressed={favoriteSet.has(doc.absolutePath)}
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        toggleFavorite(doc);
+                      }}
+                    >
+                      <StarIcon />
+                    </button>
                     <span className="fmt" data-fmt={doc.kind === "markdown" ? "MD" : "HTML"}>
                       {doc.kind === "markdown" ? "MD" : "HTML"}
                     </span>
@@ -697,8 +903,13 @@ export default function Home() {
                     </span>
                     <span className="date">{formatDate(doc.modifiedAt)}</span>
                   </div>
-                </button>
-              ))
+                </div>
+              )) : (
+                <div className="empty-filter">
+                  <strong>No documents match your filters</strong>
+                  <button className="btn" type="button" onClick={clearDocFilters}>Clear filters</button>
+                </div>
+              )
             ) : (
               filteredPrompts.map((card) => (
                 <button className="doc prompt-card" key={card.id} type="button" aria-selected={card.id === selectedPrompt?.id} onClick={() => setSelectedPromptId(card.id)}>
@@ -747,29 +958,74 @@ export default function Home() {
                 <div className="doc-path">
                   <FileIcon />
                   <span>{selectedDoc?.absolutePath ?? "Select a document to preview its contents."}</span>
+                  {selectedDoc ? (
+                    <button className="path-copy" type="button" title={copyState} aria-label={copyState} onClick={copySelectedPath}>
+                      <CopyIcon />
+                    </button>
+                  ) : null}
                 </div>
+                {selectedDoc ? (
+                  <div className="tag-editor" aria-label="Document tags">
+                    <div className="tag-chips">
+                      {selectedDocTags.map((item) => (
+                        <button key={item} type="button" className="tag-chip" onClick={() => removeSelectedTag(item)}>
+                          {item}
+                          <CloseIcon />
+                        </button>
+                      ))}
+                    </div>
+                    <form
+                      className="tag-add"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        addSelectedTag();
+                      }}
+                    >
+                      <input aria-label="Add tag" value={tagDraft} placeholder="Add tag" onChange={(event) => setTagDraft(event.target.value)} />
+                      <button className="btn" type="submit" disabled={!tagDraft.trim()}>
+                        <PlusIcon />
+                        Add tag
+                      </button>
+                    </form>
+                  </div>
+                ) : null}
               </div>
 
               <div className="actions">
-                <button className="btn" type="button" disabled={!selectedDoc} onClick={() => setEditingTitle(true)}>
-                  Edit title
-                </button>
-                <button className="btn" type="button" disabled={!selectedDoc} onClick={copySelectedPath}>
-                  <CopyIcon />
-                  {copyState}
-                </button>
-                <button className="btn" type="button" disabled={!selectedDoc} onClick={() => openSelected("open_document_folder", "open-folder")}>
-                  <FolderIcon />
-                  Folder
-                </button>
-                <button className="btn" type="button" disabled={!selectedDoc} onClick={() => openSelected("open_document_source", "open-source")}>
-                  <CodeIcon />
-                  Source
+                <button className="btn icon-label" type="button" disabled={!selectedDoc} aria-pressed={selectedDocIsFavorite} onClick={() => selectedDoc && toggleFavorite(selectedDoc)}>
+                  <StarIcon />
+                  {selectedDocIsFavorite ? "Favorited" : "Favorite"}
                 </button>
                 <a className={`btn${selectedDoc ? "" : " is-disabled"}`} href={rawHref} target="_blank" rel="noreferrer">
                   <ExternalIcon />
                   Raw
                 </a>
+                <div className="menu" ref={menuRef}>
+                  <button
+                    className="btn menu-toggle"
+                    type="button"
+                    disabled={!selectedDoc}
+                    aria-haspopup="menu"
+                    aria-expanded={menuOpen}
+                    title="More actions"
+                    onClick={() => setMenuOpen((current) => !current)}
+                  >
+                    <MoreIcon />
+                  </button>
+                  <div className="menu-pop" role="menu" data-open={menuOpen}>
+                    <button className="menu-item" type="button" role="menuitem" onClick={() => { setEditingTitle(true); setMenuOpen(false); }}>
+                      Edit title
+                    </button>
+                    <button className="menu-item" type="button" role="menuitem" onClick={() => { void openSelected("open_document_folder", "open-folder"); setMenuOpen(false); }}>
+                      <FolderIcon />
+                      Open folder
+                    </button>
+                    <button className="menu-item" type="button" role="menuitem" onClick={() => { void openSelected("open_document_source", "open-source"); setMenuOpen(false); }}>
+                      <CodeIcon />
+                      Open source
+                    </button>
+                  </div>
+                </div>
                 <button className="btn primary" type="button" disabled={!selectedDoc} title="Open full reading view (F)" onClick={() => setFullView(true)}>
                   <FullscreenIcon />
                   Full view
@@ -779,7 +1035,7 @@ export default function Home() {
           </div>
 
           <div className={`preview-wrap${selectedDoc ? "" : " empty"}`} title={selectedDoc ? "Double-click for full view" : undefined} onDoubleClick={() => selectedDoc && setFullView(true)}>
-            {renderedPreview}
+            {detailLoading ? <PreviewSkeleton /> : renderedPreview}
           </div>
             </>
           ) : (
@@ -828,7 +1084,7 @@ export default function Home() {
             </div>
             <div className="mb-actions">
               <kbd>Esc</kbd>
-              <button className="modal-close" type="button" title="Close" aria-label="Close full view" onClick={() => setFullView(false)}>
+              <button ref={fullViewCloseRef} className="modal-close" type="button" title="Close" aria-label="Close full view" onClick={() => setFullView(false)}>
                 <CloseIcon />
               </button>
             </div>
@@ -847,6 +1103,7 @@ export default function Home() {
             <div className="mb-actions">
               <kbd>Esc</kbd>
               <button
+                ref={settingsCloseRef}
                 className="modal-close"
                 type="button"
                 title="Close"
@@ -923,6 +1180,39 @@ export default function Home() {
               <p className="settings-hint">Tip: use ~ to reference your home directory. Restart spechub if you ran it with --roots.</p>
             </div>
 
+            <div className="settings-section">
+              <h3>Appearance</h3>
+              <div className="appearance-controls">
+                <label className="field">
+                  <span>Accent</span>
+                  <span className="select-wrap">
+                    <select value={accent} onChange={(event) => setAccent(event.target.value as Accent)}>
+                      <option>Green</option>
+                      <option>Blue</option>
+                      <option>Violet</option>
+                      <option>Amber</option>
+                    </select>
+                    <ChevronIcon />
+                  </span>
+                </label>
+                <label className="switch-field" title="Toggle dark chrome">
+                  <span>Dark</span>
+                  <input type="checkbox" checked={dark} onChange={(event) => setDark(event.target.checked)} />
+                </label>
+                <label className="field">
+                  <span>Density</span>
+                  <span className="select-wrap">
+                    <select value={density} onChange={(event) => setDensity(event.target.value as Density)}>
+                      <option value="compact">Compact</option>
+                      <option value="regular">Regular</option>
+                      <option value="comfy">Comfy</option>
+                    </select>
+                    <ChevronIcon />
+                  </span>
+                </label>
+              </div>
+            </div>
+
             {settingsError ? <div className="settings-error">{settingsError}</div> : null}
 
             <div className="settings-actions">
@@ -934,16 +1224,20 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      <div className="toast" aria-live="polite" data-open={Boolean(toast)}>
+        {toast}
+      </div>
     </>
   );
 }
 
-async function fetchDocs(): Promise<DocumentPayload> {
+async function fetchDocs(force = false): Promise<DocumentPayload> {
   if (isDesktop()) {
     const { invoke } = await import("@tauri-apps/api/core");
     return invoke<DocumentPayload>("scan_documents");
   }
-  const response = await fetch("/api/docs");
+  const response = await fetch(force ? "/api/docs?refresh=1" : "/api/docs");
   if (!response.ok) throw new Error("Unable to index local files.");
   return response.json() as Promise<DocumentPayload>;
 }
@@ -960,24 +1254,86 @@ async function fetchDocument(id: string): Promise<DocumentDetail> {
   return payload.doc;
 }
 
+async function fetchState(): Promise<SpecHubState> {
+  const response = await fetch("/api/state");
+  if (!response.ok) throw new Error("Unable to load dashboard state.");
+  return response.json() as Promise<SpecHubState>;
+}
+
+async function patchState(patch: Partial<SpecHubState>): Promise<SpecHubState> {
+  const response = await fetch("/api/state", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch)
+  });
+  if (!response.ok) throw new Error("Unable to save dashboard state.");
+  return response.json() as Promise<SpecHubState>;
+}
+
 function isDesktop() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 }
 
+function useFocusTrap(open: boolean, initialRef: RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const dialog = initialRef.current?.closest<HTMLElement>("[role='dialog']");
+    window.requestAnimationFrame(() => initialRef.current?.focus());
+
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key !== "Tab" || !dialog) return;
+      const focusable = [...dialog.querySelectorAll<HTMLElement>(
+        "a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex='-1'])"
+      )].filter((element) => !element.hasAttribute("disabled") && element.offsetParent !== null);
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("keydown", onKeyDown);
+      previous?.focus();
+    };
+  }, [initialRef, open]);
+}
+
 export function filterDocs(
   docs: DocumentMeta[],
-  filters: { repo: string; query: string; category: CategoryFilter; date: DateFilter; path: string; hiddenRepos?: readonly string[] }
+  filters: {
+    repo: string;
+    query: string;
+    category: CategoryFilter;
+    date: DateFilter;
+    path: string;
+    hiddenRepos?: readonly string[];
+    state?: SpecHubState;
+    favoritesOnly?: boolean;
+    tag?: string;
+  }
 ) {
   const now = Date.now();
   const query = filters.query.trim().toLowerCase();
   const pathFilter = filters.path.trim().toLowerCase();
   const maxAge = filters.date === "all" ? null : Number(filters.date) * 24 * 60 * 60 * 1000;
-  const hiddenRepoSet = new Set(filters.hiddenRepos ?? []);
+  const hiddenRepoSet = new Set(filters.hiddenRepos ?? filters.state?.hiddenRepos ?? []);
+  const favoriteSet = new Set(filters.state?.favorites ?? []);
+  const tagFilter = filters.tag && filters.tag !== "all" ? filters.tag : null;
 
   return docs.filter((doc) => {
     const haystack = `${doc.title} ${doc.repoName} ${doc.relativePath} ${doc.kind} ${doc.category}`.toLowerCase();
     if (filters.repo === "all" && hiddenRepoSet.has(doc.repoName)) return false;
     if (filters.repo !== "all" && doc.repoName !== filters.repo) return false;
+    if (filters.favoritesOnly && !favoriteSet.has(doc.absolutePath)) return false;
+    if (tagFilter && !(filters.state?.tags[doc.absolutePath] ?? []).includes(tagFilter)) return false;
     if (filters.category !== "all" && doc.category !== filters.category) return false;
     if (query && !haystack.includes(query)) return false;
     if (pathFilter && !doc.relativePath.toLowerCase().includes(pathFilter)) return false;
@@ -1048,6 +1404,17 @@ function renderPreview(doc: DocumentDetail | null) {
   return <iframe className="html-frame" sandbox="" src={doc.rawUrl} srcDoc={doc.rawContent} title={doc.title} />;
 }
 
+function PreviewSkeleton() {
+  return (
+    <div className="preview-skeleton" aria-label="Loading document preview">
+      <span />
+      <span />
+      <span />
+      <span />
+    </div>
+  );
+}
+
 function sanitizeMarkdown(markdown: string) {
   const rendered = marked.parse(markdown, markedOptions) as string;
   return DOMPurify.sanitize(rendered, {
@@ -1061,6 +1428,13 @@ function formatDate(input: string) {
     month: "short",
     day: "numeric",
     year: "numeric"
+  }).format(new Date(input));
+}
+
+function formatLiveTime(input: number) {
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit"
   }).format(new Date(input));
 }
 
@@ -1117,8 +1491,32 @@ function readStoredHiddenRepos() {
   }
 }
 
+function emptySpecHubState(hiddenRepos: string[] = []): SpecHubState {
+  return {
+    favorites: [],
+    tags: {},
+    hiddenRepos
+  };
+}
+
+function normalizeClientState(state: SpecHubState): SpecHubState {
+  const tags = Object.fromEntries(
+    Object.entries(state.tags)
+      .map(([key, value]) => [key, normalizeRepoNames(value)] as const)
+      .filter(([, value]) => value.length > 0)
+      .sort(([left], [right]) => left.localeCompare(right))
+  );
+  return {
+    favorites: normalizeRepoNames(state.favorites),
+    tags,
+    hiddenRepos: normalizeRepoNames(state.hiddenRepos)
+  };
+}
+
 function normalizeRepoNames(names: unknown[]) {
-  return [...new Set(names.filter((name): name is string => typeof name === "string" && name.trim().length > 0))]
+  return [...new Set(names
+    .filter((name): name is string => typeof name === "string" && name.trim().length > 0)
+    .map((name) => name.trim()))]
     .sort((left, right) => left.localeCompare(right));
 }
 
@@ -1153,6 +1551,14 @@ function ChevronIcon() {
 
 function RefreshIcon() {
   return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4" /><path d="M21 3v5h-5" /></svg>;
+}
+
+function StarIcon() {
+  return <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z" /></svg>;
+}
+
+function MoreIcon() {
+  return <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>;
 }
 
 function EyeOffIcon() {

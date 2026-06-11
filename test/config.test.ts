@@ -38,6 +38,26 @@ describe("resolveConfig", () => {
       "docs/supperpowers/specs/**/*.{md,markdown,html}"
     ]));
   });
+
+  it("flags agent-storage scoping when roots are user-provided", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-config-scope-"));
+    const configPath = path.join(root, "config.json");
+    await writeFile(configPath, JSON.stringify({ roots: ["~/workspace/work"] }, null, 2));
+
+    const fromFile = await resolveConfig({ configPath });
+    expect(fromFile.restrictAgentStorageToRoots).toBe(true);
+
+    const fromCli = await resolveConfig({ configPath, roots: ["~/workspace/work"] });
+    expect(fromCli.restrictAgentStorageToRoots).toBe(true);
+  });
+
+  it("does not scope agent storage when relying on default roots", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-config-default-"));
+    const configPath = path.join(root, "config.json");
+
+    const config = await resolveConfig({ configPath });
+    expect(config.restrictAgentStorageToRoots).toBe(false);
+  });
 });
 
 describe("normalizeRoots", () => {

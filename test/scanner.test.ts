@@ -187,6 +187,72 @@ describe("scanDocuments", () => {
     });
   });
 
+  it("uses title-cased slugs for Claude plans without headings", async () => {
+    const root = await fixtureRoot();
+    const claude = path.join(root, ".claude");
+    await mkdir(path.join(claude, "plans"), { recursive: true });
+    await writeFile(path.join(claude, "plans", "improve-spechub-cryptic-quail.md"), "Implement the next phase.\n");
+
+    const docs = await scanDocuments({
+      roots: [path.join(root, "workspace")],
+      sources: [
+        {
+          ...defaultConfig().sources.find((source) => source.name === "claude")!,
+          roots: [claude]
+        }
+      ]
+    });
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0]).toMatchObject({
+      title: "Improve Spechub Cryptic Quail",
+      sourceTitle: "Improve Spechub Cryptic Quail",
+      sourceName: "claude",
+      category: "plan",
+      relativePath: "plans/improve-spechub-cryptic-quail.md"
+    });
+  });
+
+  it("infers Claude plan repositories by repo name and falls back to the source name", async () => {
+    const root = await fixtureRoot();
+    const workspace = path.join(root, "workspace");
+    const repo = path.join(workspace, "spechub");
+    const claude = path.join(root, ".claude");
+    await mkdir(repo, { recursive: true });
+    await mkdir(path.join(claude, "plans"), { recursive: true });
+    await writeFile(path.join(repo, "package.json"), "{}");
+    await writeFile(
+      path.join(claude, "plans", "repo-name-only.md"),
+      "# Repo Name Only\n\nUpdate spechub without mentioning its absolute path.\n"
+    );
+    await writeFile(
+      path.join(claude, "plans", "unknown-repo.md"),
+      "# Unknown Repo\n\nNo workspace project is named here.\n"
+    );
+
+    const docs = await scanDocuments({
+      roots: [workspace],
+      sources: [
+        {
+          ...defaultConfig().sources.find((source) => source.name === "claude")!,
+          roots: [claude]
+        }
+      ]
+    });
+
+    expect(docs).toHaveLength(2);
+    expect(docs.find((doc) => doc.relativePath === "plans/repo-name-only.md")).toMatchObject({
+      repoName: "spechub",
+      sourceName: "claude",
+      category: "plan"
+    });
+    expect(docs.find((doc) => doc.relativePath === "plans/unknown-repo.md")).toMatchObject({
+      repoName: "claude",
+      sourceName: "claude",
+      category: "plan"
+    });
+  });
+
   it("indexes workspace-local Claude plans outside discovered repositories", async () => {
     const root = await fixtureRoot();
     const workspace = path.join(root, "workspace");
@@ -404,6 +470,49 @@ describe("scanDocuments", () => {
       }
     });
     expect(docs[0].sizeBytes).toBeGreaterThan(0);
+  });
+
+  it("filters agent-storage plans to repos under roots when scoped", async () => {
+    const root = await fixtureRoot();
+    const workspace = path.join(root, "workspace");
+    const inScopeRepo = path.join(workspace, "core-api");
+    const outScopeRepo = path.join(root, "external", "legacy-api");
+    const claudePlans = path.join(root, ".claude", "plans");
+    await mkdir(inScopeRepo, { recursive: true });
+    await mkdir(outScopeRepo, { recursive: true });
+    await mkdir(claudePlans, { recursive: true });
+    await writeFile(path.join(inScopeRepo, "package.json"), "{}");
+    await writeFile(path.join(outScopeRepo, "package.json"), "{}");
+    await writeFile(
+      path.join(claudePlans, "in-scope.md"),
+      `# In Scope Plan\n\nUpdate \`${inScopeRepo}\` resolvers.\n`
+    );
+    await writeFile(
+      path.join(claudePlans, "out-of-scope.md"),
+      `# Out Of Scope Plan\n\nUpdate \`${outScopeRepo}\` resolvers.\n`
+    );
+
+    const source = {
+      ...defaultConfig().sources.find((entry) => entry.name === "claude")!,
+      roots: [path.join(root, ".claude")]
+    };
+
+    const scoped = await scanDocuments({
+      roots: [workspace],
+      sources: [source],
+      restrictAgentStorageToRoots: true
+    });
+    expect(scoped.map((doc) => doc.relativePath)).toEqual(["plans/in-scope.md"]);
+    expect(scoped[0]).toMatchObject({ repoName: "core-api", sourceName: "claude" });
+
+    const unscoped = await scanDocuments({
+      roots: [workspace],
+      sources: [source]
+    });
+    expect(unscoped.map((doc) => doc.relativePath).sort()).toEqual([
+      "plans/in-scope.md",
+      "plans/out-of-scope.md"
+    ]);
   });
 });
 

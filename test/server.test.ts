@@ -1,9 +1,11 @@
 import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import initSqlJs from "sql.js";
 import request from "supertest";
 import { createApp } from "../src/server.js";
+import type { DocumentIndex } from "../src/index-service.js";
 
 async function fixtureRoot() {
   const root = await mkdtemp(path.join(tmpdir(), "spechub-server-"));
@@ -218,7 +220,130 @@ describe("server routes", () => {
       .send({ roots: ["   ", ""] })
       .expect(400);
   });
+
+  it("recovers from a corrupt config file with a warning", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-server-corrupt-config-"));
+    const configPath = path.join(root, "config.json");
+    await writeFile(configPath, "{ not json");
+    const app = createApp({ configPath });
+
+    await request(app)
+      .get("/api/docs")
+      .expect(200)
+      .expect((response) => {
+        expect(Array.isArray(response.body.docs)).toBe(true);
+      });
+
+    await request(app)
+      .get("/api/config")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.warnings[0]).toMatch(/could not be parsed/i);
+      });
+  });
+
+  it("reads and patches persisted dashboard state", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-server-state-"));
+    const statePath = path.join(root, "state.json");
+    const app = createApp({ roots: [root], statePath });
+
+    await request(app)
+      .get("/api/state")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body).toEqual({ favorites: [], tags: {}, hiddenRepos: [] });
+      });
+
+    await request(app)
+      .patch("/api/state")
+      .send({
+        favorites: ["/repo/a.md"],
+        tags: { "/repo/a.md": ["api", "plan"] },
+        hiddenRepos: ["archive"]
+      })
+      .expect(200)
+      .expect((response) => {
+        expect(response.body).toEqual({
+          favorites: ["/repo/a.md"],
+          tags: { "/repo/a.md": ["api", "plan"] },
+          hiddenRepos: ["archive"]
+        });
+      });
+
+    await request(app)
+      .get("/api/state")
+      .expect(200)
+      .expect((response) => {
+        expect(response.body.hiddenRepos).toEqual(["archive"]);
+      });
+  });
+
+  it("rejects invalid dashboard state payloads with 400", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-server-state-invalid-"));
+    const statePath = path.join(root, "state.json");
+    const app = createApp({ roots: [root], statePath });
+
+    await request(app)
+      .patch("/api/state")
+      .send({ favorites: "nope" })
+      .expect(400);
+
+    await request(app)
+      .patch("/api/state")
+      .send({ tags: { "/repo/a.md": [1] } })
+      .expect(400);
+  });
+
+  it("serves SSE events and removes listeners on disconnect", async () => {
+    const events = new EventEmitter();
+    const index: DocumentIndex = {
+      events,
+      getDocs: async () => [],
+      findById: async () => undefined,
+      refresh: async () => [],
+      invalidate: () => {},
+      startWatching: async () => {},
+      close: async () => {}
+    };
+    const app = createApp({}, index);
+    const server = app.listen(0);
+    const address = server.address();
+    if (!address || typeof address === "string") throw new Error("Expected test server address");
+    const url = `http://127.0.0.1:${address.port}/api/events`;
+
+    try {
+      const response = await fetch(url);
+      expect(response.status).toBe(200);
+      expect(response.headers.get("content-type")).toContain("text/event-stream");
+      expect(events.listenerCount("docs-changed")).toBe(1);
+
+      const reader = response.body?.getReader();
+      expect(reader).toBeDefined();
+      const first = await reader!.read();
+      expect(new TextDecoder().decode(first.value)).toContain("event: hello");
+
+      await reader!.cancel();
+      await waitFor(() => expect(events.listenerCount("docs-changed")).toBe(0));
+    } finally {
+      await new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+  });
 });
+
+async function waitFor(assertion: () => void | Promise<void>, timeoutMs = 1_000): Promise<void> {
+  const started = Date.now();
+  let lastError: unknown;
+  while (Date.now() - started < timeoutMs) {
+    try {
+      await assertion();
+      return;
+    } catch (error) {
+      lastError = error;
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+  }
+  if (lastError) throw lastError;
+}
 
 async function writeOpenCodePlanDb(dbPath: string, repo: string): Promise<void> {
   const SQL = await initSqlJs();
