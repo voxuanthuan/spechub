@@ -820,7 +820,7 @@ export default function Home() {
       </div>
 
       <div className="modal-backdrop" data-open={fullView} onClick={(event) => event.target === event.currentTarget && setFullView(false)}>
-        <div className="modal" role="dialog" aria-modal="true" aria-label="Document full view">
+        <div className="modal doc-modal" role="dialog" aria-modal="true" aria-label="Document full view">
           <div className="modal-bar">
             <div className="mb-title">
               <b>{selectedDoc?.title ?? "No document selected"}</b>
