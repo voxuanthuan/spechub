@@ -1,8 +1,26 @@
 "use client";
 
-import DOMPurify from "dompurify";
-import { marked } from "marked";
 import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { ErrorBoundary } from "./components/ErrorBoundary.js";
+import {
+  ChevronIcon, CloseIcon, CodeIcon, CopyIcon, EyeOffIcon,
+  ExternalIcon, FileIcon, FolderIcon, FullscreenIcon, MoreIcon,
+  PlusCircleIcon, PlusIcon, RefreshIcon, SearchIcon, SettingsIcon,
+  StarIcon, TrashIcon
+} from "./components/icons/index.js";
+import { fetchDocs, fetchDocument, fetchState, isDesktop, patchState } from "./lib/api.js";
+import { filterDocs, normalizeRepoNames, summarizeRepos } from "./lib/filters.js";
+import { formatDate, formatLiveTime } from "./lib/format.js";
+import { sanitizeMarkdown } from "./lib/sanitize.js";
+import {
+  createDraftId, emptySpecHubState, normalizeClientState,
+  readStoredAccent, readStoredDensity, readStoredHiddenRepos, readStoredView
+} from "./lib/storage.js";
+import type {
+  Accent, AccentTokens, ActiveView, CategoryFilter, ConfigInfo,
+  ConfigRoot, DateFilter, Density, DocumentDetail, DocumentMeta,
+  DraftRoot, RepoSummary, SpecHubState
+} from "./lib/types.js";
 import {
   filterPromptCards,
   promptCards,
@@ -12,82 +30,6 @@ import {
   type PromptCategoryFilter,
   type PromptTagFilter
 } from "./prompts.js";
-
-type DocumentKind = "markdown" | "html";
-type DocumentCategory = "plan" | "spec" | "superpowers" | "doc";
-type CategoryFilter = DocumentCategory | "all";
-type DateFilter = "all" | "1" | "3" | "7" | "30";
-type Accent = "Green" | "Blue" | "Violet" | "Amber";
-type Density = "compact" | "regular" | "comfy";
-type ActiveView = "documents" | "prompts";
-type RepoSummary = { name: string; count: number };
-
-interface ConfigRoot {
-  path: string;
-  expandedPath: string;
-  exists: boolean;
-}
-
-interface ConfigInfo {
-  configPath: string;
-  roots: ConfigRoot[];
-  explicitRoots: boolean;
-  warnings: string[];
-}
-
-interface DraftRoot {
-  id: string;
-  path: string;
-  initial: ConfigRoot | null;
-}
-
-interface DocumentMeta {
-  id: string;
-  title: string;
-  sourceTitle: string;
-  kind: DocumentKind;
-  category: DocumentCategory;
-  sourceName: string;
-  absolutePath: string;
-  relativePath: string;
-  repoName: string;
-  repoRoot: string;
-  modifiedAt: string;
-  mtimeMs: number;
-  sizeBytes: number;
-}
-
-interface DocumentDetail extends DocumentMeta {
-  rawUrl?: string;
-  rawContent?: string;
-  renderedHtml?: string;
-}
-
-interface DocumentPayload {
-  docs: DocumentMeta[];
-  repos: Array<{ name: string; count: number }>;
-}
-
-interface SpecHubState {
-  favorites: string[];
-  tags: Record<string, string[]>;
-  hiddenRepos: string[];
-}
-
-interface AccentTokens {
-  accent: string;
-  strong: string;
-  soft: string;
-  line: string;
-  softDark: string;
-  lineDark: string;
-}
-
-const markedOptions = {
-  async: false,
-  breaks: false,
-  gfm: true
-} as const;
 
 const accents: Record<Accent, AccentTokens> = {
   Green: {
@@ -653,7 +595,8 @@ export default function Home() {
     : "Search prompt pages, tags, or source URLs...";
 
   return (
-    <>
+    <ErrorBoundary>
+      <a href="#main-content" className="skip-to-content">Skip to content</a>
       <div className="app" data-sidebar={sidebarCollapsed ? "collapsed" : "expanded"}>
         <aside className="sidebar" aria-label="Repositories">
           <div className="brand">
@@ -927,7 +870,7 @@ export default function Home() {
           </div>
         </section>
 
-        <main className="main" aria-label="Document view">
+        <main id="main-content" className="main" aria-label="Document view">
           {activeView === "documents" ? (
             <>
           <div className="doc-header">
@@ -1228,51 +1171,10 @@ export default function Home() {
       <div className="toast" aria-live="polite" data-open={Boolean(toast)}>
         {toast}
       </div>
-    </>
+    </ErrorBoundary>
   );
 }
 
-async function fetchDocs(force = false): Promise<DocumentPayload> {
-  if (isDesktop()) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    return invoke<DocumentPayload>("scan_documents");
-  }
-  const response = await fetch(force ? "/api/docs?refresh=1" : "/api/docs");
-  if (!response.ok) throw new Error("Unable to index local files.");
-  return response.json() as Promise<DocumentPayload>;
-}
-
-async function fetchDocument(id: string): Promise<DocumentDetail> {
-  if (isDesktop()) {
-    const { invoke } = await import("@tauri-apps/api/core");
-    const payload = await invoke<{ doc: DocumentDetail }>("get_document", { id });
-    return payload.doc;
-  }
-  const response = await fetch(`/api/docs/${id}`);
-  if (!response.ok) throw new Error("Document not found.");
-  const payload = (await response.json()) as { doc: DocumentDetail };
-  return payload.doc;
-}
-
-async function fetchState(): Promise<SpecHubState> {
-  const response = await fetch("/api/state");
-  if (!response.ok) throw new Error("Unable to load dashboard state.");
-  return response.json() as Promise<SpecHubState>;
-}
-
-async function patchState(patch: Partial<SpecHubState>): Promise<SpecHubState> {
-  const response = await fetch("/api/state", {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(patch)
-  });
-  if (!response.ok) throw new Error("Unable to save dashboard state.");
-  return response.json() as Promise<SpecHubState>;
-}
-
-function isDesktop() {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
 
 function useFocusTrap(open: boolean, initialRef: RefObject<HTMLElement | null>) {
   useEffect(() => {
@@ -1306,49 +1208,7 @@ function useFocusTrap(open: boolean, initialRef: RefObject<HTMLElement | null>) 
   }, [initialRef, open]);
 }
 
-export function filterDocs(
-  docs: DocumentMeta[],
-  filters: {
-    repo: string;
-    query: string;
-    category: CategoryFilter;
-    date: DateFilter;
-    path: string;
-    hiddenRepos?: readonly string[];
-    state?: SpecHubState;
-    favoritesOnly?: boolean;
-    tag?: string;
-  }
-) {
-  const now = Date.now();
-  const query = filters.query.trim().toLowerCase();
-  const pathFilter = filters.path.trim().toLowerCase();
-  const maxAge = filters.date === "all" ? null : Number(filters.date) * 24 * 60 * 60 * 1000;
-  const hiddenRepoSet = new Set(filters.hiddenRepos ?? filters.state?.hiddenRepos ?? []);
-  const favoriteSet = new Set(filters.state?.favorites ?? []);
-  const tagFilter = filters.tag && filters.tag !== "all" ? filters.tag : null;
-
-  return docs.filter((doc) => {
-    const haystack = `${doc.title} ${doc.repoName} ${doc.relativePath} ${doc.kind} ${doc.category}`.toLowerCase();
-    if (filters.repo === "all" && hiddenRepoSet.has(doc.repoName)) return false;
-    if (filters.repo !== "all" && doc.repoName !== filters.repo) return false;
-    if (filters.favoritesOnly && !favoriteSet.has(doc.absolutePath)) return false;
-    if (tagFilter && !(filters.state?.tags[doc.absolutePath] ?? []).includes(tagFilter)) return false;
-    if (filters.category !== "all" && doc.category !== filters.category) return false;
-    if (query && !haystack.includes(query)) return false;
-    if (pathFilter && !doc.relativePath.toLowerCase().includes(pathFilter)) return false;
-    if (maxAge && now - new Date(doc.modifiedAt).getTime() > maxAge) return false;
-    return true;
-  });
-}
-
-function summarizeRepos(docs: DocumentMeta[]): RepoSummary[] {
-  const counts = new Map<string, number>();
-  for (const doc of docs) counts.set(doc.repoName, (counts.get(doc.repoName) ?? 0) + 1);
-  return [...counts.entries()]
-    .map(([name, count]) => ({ name, count }))
-    .sort((left, right) => left.name.localeCompare(right.name));
-}
+export { filterDocs } from "./lib/filters.js";
 
 function RepoFilterRow({
   item,
@@ -1415,28 +1275,6 @@ function PreviewSkeleton() {
   );
 }
 
-function sanitizeMarkdown(markdown: string) {
-  const rendered = marked.parse(markdown, markedOptions) as string;
-  return DOMPurify.sanitize(rendered, {
-    ADD_ATTR: ["checked", "target"],
-    ADD_TAGS: ["input"]
-  });
-}
-
-function formatDate(input: string) {
-  return new Intl.DateTimeFormat(undefined, {
-    month: "short",
-    day: "numeric",
-    year: "numeric"
-  }).format(new Date(input));
-}
-
-function formatLiveTime(input: number) {
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "2-digit",
-    minute: "2-digit"
-  }).format(new Date(input));
-}
 
 function promptCategoriesOptions(categories: ReturnType<typeof summarizePromptCategories>) {
   return categories.map((category) => (
@@ -1467,68 +1305,8 @@ function PromptSourcePreview({ card }: { card: PromptCard }) {
   );
 }
 
-function readStoredAccent(): Accent {
-  const stored = window.localStorage.getItem("spechub:accent");
-  return stored === "Blue" || stored === "Violet" || stored === "Amber" ? stored : "Green";
-}
-
-function readStoredDensity(): Density {
-  const stored = window.localStorage.getItem("spechub:density");
-  return stored === "compact" || stored === "comfy" ? stored : "regular";
-}
-
-function readStoredView(): ActiveView {
-  return window.localStorage.getItem("spechub:view") === "prompts" ? "prompts" : "documents";
-}
-
-function readStoredHiddenRepos() {
-  if (typeof window === "undefined") return [];
-  try {
-    const parsed = JSON.parse(window.localStorage.getItem("spechub:hidden-repos") ?? "[]");
-    return Array.isArray(parsed) ? normalizeRepoNames(parsed) : [];
-  } catch {
-    return [];
-  }
-}
-
-function emptySpecHubState(hiddenRepos: string[] = []): SpecHubState {
-  return {
-    favorites: [],
-    tags: {},
-    hiddenRepos
-  };
-}
-
-function normalizeClientState(state: SpecHubState): SpecHubState {
-  const tags = Object.fromEntries(
-    Object.entries(state.tags)
-      .map(([key, value]) => [key, normalizeRepoNames(value)] as const)
-      .filter(([, value]) => value.length > 0)
-      .sort(([left], [right]) => left.localeCompare(right))
-  );
-  return {
-    favorites: normalizeRepoNames(state.favorites),
-    tags,
-    hiddenRepos: normalizeRepoNames(state.hiddenRepos)
-  };
-}
-
-function normalizeRepoNames(names: unknown[]) {
-  return [...new Set(names
-    .filter((name): name is string => typeof name === "string" && name.trim().length > 0)
-    .map((name) => name.trim()))]
-    .sort((left, right) => left.localeCompare(right));
-}
-
 function toDraftRoot(root: ConfigRoot): DraftRoot {
   return { id: createDraftId(), path: root.path, initial: root };
-}
-
-function createDraftId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
-    return crypto.randomUUID();
-  }
-  return `draft-${Math.random().toString(36).slice(2, 10)}-${Date.now().toString(36)}`;
 }
 
 function rootDisplayStatus(entry: DraftRoot): { state: "ok" | "missing" | "new"; label: string } {
@@ -1541,70 +1319,4 @@ function rootDisplayStatus(entry: DraftRoot): { state: "ok" | "missing" | "new";
     : { state: "missing", label: "Missing" };
 }
 
-function SearchIcon() {
-  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" /></svg>;
-}
 
-function ChevronIcon() {
-  return <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="m6 9 6 6 6-6" /></svg>;
-}
-
-function RefreshIcon() {
-  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4" /><path d="M21 3v5h-5" /></svg>;
-}
-
-function StarIcon() {
-  return <svg viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2-5.6-2.9-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z" /></svg>;
-}
-
-function MoreIcon() {
-  return <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>;
-}
-
-function EyeOffIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m3 3 18 18" /><path d="M10.6 10.6A3 3 0 0 0 13.4 13.4" /><path d="M9.9 4.2A10.7 10.7 0 0 1 12 4c6.5 0 10 8 10 8a17.4 17.4 0 0 1-2.7 3.7" /><path d="M6.6 6.6C3.6 8.7 2 12 2 12s3.5 8 10 8a10.9 10.9 0 0 0 4.7-1" /></svg>;
-}
-
-function PlusCircleIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="9" /><path d="M12 8v8M8 12h8" /></svg>;
-}
-
-function FileIcon() {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5z" /><path d="M14 2v6h6" /></svg>;
-}
-
-function CopyIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="9" y="9" width="13" height="13" rx="2" /><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1" /></svg>;
-}
-
-function FolderIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M4 20h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" /></svg>;
-}
-
-function CodeIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="m18 16 4-4-4-4" /><path d="m6 8-4 4 4 4" /><path d="m14.5 4-5 16" /></svg>;
-}
-
-function ExternalIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M15 3h6v6" /><path d="M10 14 21 3" /><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" /></svg>;
-}
-
-function FullscreenIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M8 3H5a2 2 0 0 0-2 2v3" /><path d="M21 8V5a2 2 0 0 0-2-2h-3" /><path d="M3 16v3a2 2 0 0 0 2 2h3" /><path d="M16 21h3a2 2 0 0 0 2-2v-3" /></svg>;
-}
-
-function CloseIcon() {
-  return <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M18 6 6 18M6 6l12 12" /></svg>;
-}
-
-function SettingsIcon() {
-  return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.6 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9c.13.34.2.7.2 1.06a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" /></svg>;
-}
-
-function PlusIcon() {
-  return <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>;
-}
-
-function TrashIcon() {
-  return <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M3 6h18" /><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2" /><path d="m19 6-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /></svg>;
-}
