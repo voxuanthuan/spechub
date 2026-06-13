@@ -99,7 +99,7 @@ export function createApp(config: RuntimeSpecHubConfig = {}, index: DocumentInde
       return;
     }
 
-    const title = typeof request.body?.title === "string" ? request.body.title : "";
+    const title = typeof request.body?.title === "string" ? request.body.title.slice(0, 500) : "";
     await updateTitleOverride(config.configPath ?? DEFAULT_CONFIG_PATH, doc.absolutePath, title);
     await index.refresh();
     const updated = await index.findById(request.params.id);
@@ -129,6 +129,10 @@ export function createApp(config: RuntimeSpecHubConfig = {}, index: DocumentInde
     const candidate = request.body?.roots;
     if (!Array.isArray(candidate) || !candidate.every((entry: unknown) => typeof entry === "string")) {
       response.status(400).json({ error: "roots must be an array of strings." });
+      return;
+    }
+    if (candidate.length > 50) {
+      response.status(400).json({ error: "Too many roots (max 50)." });
       return;
     }
     try {

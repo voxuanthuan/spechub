@@ -2,7 +2,9 @@ import { EventEmitter } from "node:events";
 import type { Stats } from "node:fs";
 import path from "node:path";
 import chokidar, { type FSWatcher } from "chokidar";
+import micromatch from "micromatch";
 import { DEFAULT_CONFIG_PATH, expandHome, defaultConfig, resolveConfig } from "./config.js";
+import { normalizePath } from "./paths.js";
 import { scanDocuments } from "./scanner.js";
 import type { DocumentMeta, RuntimeSpecHubConfig, SpecHubConfig } from "./types.js";
 
@@ -225,13 +227,11 @@ function isConfigPath(candidate: string, configPath?: string): boolean {
 }
 
 function isIgnored(relativePath: string, ignorePatterns: string[]): boolean {
-  const segments = normalizePath(relativePath).split("/");
-  return ignorePatterns.some((pattern) => {
-    if (!pattern.includes("*") && !pattern.includes("/")) return segments.includes(pattern);
-    return pattern.includes("*") ? false : segments.includes(pattern);
-  });
-}
-
-function normalizePath(input: string): string {
-  return input.split(path.sep).join("/");
+  const normalized = normalizePath(relativePath);
+  const segments = normalized.split("/");
+  const simple = ignorePatterns.filter((pattern) => !pattern.includes("*") && !pattern.includes("/"));
+  if (simple.some((pattern) => segments.includes(pattern))) return true;
+  const globs = ignorePatterns.filter((pattern) => pattern.includes("*") || pattern.includes("/"));
+  if (globs.length > 0 && micromatch.isMatch(normalized, globs)) return true;
+  return false;
 }

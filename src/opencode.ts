@@ -3,12 +3,10 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import initSqlJs from "sql.js";
 import { normalizeOverridePath } from "./config.js";
+import { findHintByPath, inferRepoFromContent, normalizePath, type RepoHint } from "./paths.js";
 import type { DocumentMeta, SpecHubSource } from "./types.js";
 
-interface RepoHint {
-  root: string;
-  name: string;
-}
+const MAX_OPENCODE_DB_BYTES = 50 * 1024 * 1024;
 
 interface SessionRow {
   id: string;
@@ -27,6 +25,7 @@ interface TextPartRow {
 }
 
 const MAX_PLAN_SESSIONS = 200;
+export { type RepoHint } from "./paths.js";
 
 export async function scanOpenCodePlanSource(
   source: SpecHubSource,
@@ -70,6 +69,8 @@ async function scanOpenCodeDbPath(
   } catch {
     return [];
   }
+
+  if (stats.size > MAX_OPENCODE_DB_BYTES) return [];
 
   const db = await openDatabase(dbPath);
   try {
@@ -219,24 +220,7 @@ function resolveRepo(directory: string | undefined, raw: string, repoHints: Repo
     if (matchedHint) return matchedHint;
     return { root: directory, name: path.basename(directory) };
   }
-  return inferRepo(raw, repoHints);
-}
-
-function findHintByPath(absolutePath: string, repoHints: RepoHint[]): RepoHint | undefined {
-  if (repoHints.length === 0) return undefined;
-  const normalized = normalizePath(path.resolve(absolutePath));
-  return [...repoHints]
-    .sort((left, right) => right.root.length - left.root.length)
-    .find((repo) => normalized === repo.root || normalized.startsWith(`${repo.root}/`));
-}
-
-function inferRepo(raw: string, repoHints: RepoHint[]): RepoHint | undefined {
-  const normalizedRaw = normalizePath(raw);
-  const byRootLength = [...repoHints].sort((left, right) => right.root.length - left.root.length);
-  const exactRoot = byRootLength.find((repo) => normalizedRaw.includes(repo.root));
-  if (exactRoot) return exactRoot;
-
-  return byRootLength.find((repo) => new RegExp(`(^|[^\\w-])${escapeRegExp(repo.name)}([^\\w-]|$)`, "i").test(raw));
+  return inferRepoFromContent(raw, repoHints);
 }
 
 function cleanTitle(input: string): string {
@@ -245,12 +229,4 @@ function cleanTitle(input: string): string {
 
 function safeFilename(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]+/g, "-");
-}
-
-function normalizePath(input: string): string {
-  return input.split(path.sep).join("/");
-}
-
-function escapeRegExp(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
