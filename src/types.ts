@@ -26,6 +26,8 @@ export interface SpecHubConfig {
    * to those belonging to a repo under `roots`. Runtime-only; not persisted to config.json.
    */
   restrictAgentStorageToRoots?: boolean;
+  maxPlanSessions?: number;
+  watchDepth?: number;
 }
 
 export type RuntimeSpecHubConfig = Partial<SpecHubConfig> & {

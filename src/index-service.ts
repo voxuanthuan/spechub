@@ -10,7 +10,7 @@ import type { DocumentMeta, RuntimeSpecHubConfig, SpecHubConfig } from "./types.
 
 const WATCH_EXTENSIONS = new Set([".md", ".markdown", ".html", ".db"]);
 const DEFAULT_DEBOUNCE_MS = 500;
-const WATCH_DEPTH = 8;
+const DEFAULT_WATCH_DEPTH = 8;
 
 export interface DocumentIndex {
   events: EventEmitter;
@@ -130,7 +130,7 @@ export function createDocumentIndex(
     const roots = watchPaths.map((item) => path.resolve(item));
     watcher = chokidar.watch(roots, {
       ignoreInitial: true,
-      depth: WATCH_DEPTH,
+      depth: config.watchDepth ?? DEFAULT_WATCH_DEPTH,
       awaitWriteFinish: { stabilityThreshold: 200, pollInterval: 50 },
       ignored: (candidate, stats) => shouldIgnoreWatchPath(candidate.toString(), roots, config.ignorePatterns ?? defaultConfig().ignorePatterns, stats)
     });

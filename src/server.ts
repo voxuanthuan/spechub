@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { access, readFile, stat } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
@@ -38,10 +39,25 @@ export function createApp(config: RuntimeSpecHubConfig = {}, index: DocumentInde
   app.use("/assets", express.static(legacyWebDir, { fallthrough: false }));
 
   app.get("/api/docs", asyncRoute(async (request, response) => {
-    const docs = request.query.refresh === "1" ? await index.refresh() : await index.getDocs();
+    const allDocs = request.query.refresh === "1" ? await index.refresh() : await index.getDocs();
+
+    const etag = computeETag(allDocs);
+    if (request.headers["if-none-match"] === etag) {
+      response.status(304).end();
+      return;
+    }
+    response.setHeader("ETag", etag);
+
+    const limitParam = parseInt(request.query.limit as string, 10);
+    const offsetParam = parseInt(request.query.offset as string, 10);
+    const limit = Number.isFinite(limitParam) && limitParam > 0 ? limitParam : undefined;
+    const offset = Number.isFinite(offsetParam) && offsetParam >= 0 ? offsetParam : 0;
+
+    const docs = limit ? allDocs.slice(offset, offset + limit) : allDocs.slice(offset);
     response.json({
       docs,
-      repos: summarizeRepos(docs)
+      repos: summarizeRepos(allDocs),
+      total: allDocs.length
     });
   }));
 
@@ -300,4 +316,10 @@ function asyncRoute(handler: (request: Request, response: Response) => Promise<v
 
 function notFound(response: Response) {
   return response.status(404).json({ error: "Document not found" });
+}
+
+function computeETag(docs: DocumentMeta[]): string {
+  const digest = createHash("md5");
+  for (const doc of docs) digest.update(`${doc.id}:${doc.mtimeMs}\n`);
+  return `"${digest.digest("hex")}"`;
 }

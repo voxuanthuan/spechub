@@ -24,16 +24,17 @@ interface TextPartRow {
   part_data: string;
 }
 
-const MAX_PLAN_SESSIONS = 200;
+const DEFAULT_MAX_PLAN_SESSIONS = 200;
 export { type RepoHint } from "./paths.js";
 
 export async function scanOpenCodePlanSource(
   source: SpecHubSource,
   titleOverrides: Record<string, string>,
-  repoHints: RepoHint[]
+  repoHints: RepoHint[],
+  maxSessions = DEFAULT_MAX_PLAN_SESSIONS
 ): Promise<DocumentMeta[]> {
   const docs = await Promise.all(
-    source.roots.map(async (root) => scanOpenCodeDbPath(await resolveOpenCodeDbPath(root), source, titleOverrides, repoHints))
+    source.roots.map(async (root) => scanOpenCodeDbPath(await resolveOpenCodeDbPath(root), source, titleOverrides, repoHints, maxSessions))
   );
   return docs.flat();
 }
@@ -61,7 +62,8 @@ async function scanOpenCodeDbPath(
   dbPath: string,
   source: SpecHubSource,
   titleOverrides: Record<string, string>,
-  repoHints: RepoHint[]
+  repoHints: RepoHint[],
+  maxSessions: number
 ): Promise<DocumentMeta[]> {
   let stats;
   try {
@@ -82,7 +84,7 @@ async function scanOpenCodeDbPath(
         FROM session
         WHERE agent = 'plan' OR agent = 'explore' OR agent = '' OR agent IS NULL
         ORDER BY COALESCE(time_updated, time_created, 0) DESC
-        LIMIT ${MAX_PLAN_SESSIONS}
+        LIMIT ${maxSessions}
       `
     );
 

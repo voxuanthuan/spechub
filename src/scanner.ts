@@ -41,7 +41,7 @@ export async function scanDocuments(config: Partial<SpecHubConfig> = {}): Promis
     : [];
   const docs = await Promise.all(
     [...sources, ...localAgentSources].map((source) =>
-      scanSource(source, resolved.ignorePatterns, resolved.titleOverrides, repoHints)
+      scanSource(source, resolved.ignorePatterns, resolved.titleOverrides, repoHints, resolved.maxPlanSessions)
     )
   );
 
@@ -63,10 +63,11 @@ async function scanSource(
   source: SpecHubSource,
   ignorePatterns: string[],
   titleOverrides: Record<string, string>,
-  repoHints: RepoHint[]
+  repoHints: RepoHint[],
+  maxPlanSessions?: number
 ): Promise<DocumentMeta[]> {
   if (source.mode === "opencode-db") {
-    return scanOpenCodePlanSource(source, titleOverrides, repoHints);
+    return scanOpenCodePlanSource(source, titleOverrides, repoHints, maxPlanSessions);
   }
 
   if (source.mode === "direct") {
