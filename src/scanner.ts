@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
-import { readdir, stat } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import fg from "fast-glob";
 import micromatch from "micromatch";
@@ -290,7 +290,11 @@ async function createDocumentMeta(
     const sourceTitle = extractTitle(head, relativePath, kind);
     const override = titleOverrides[normalizeOverridePath(absolutePath)];
     const pathRepo = findHintByPath(absolutePath, repoHints);
-    const contentRepo = pathRepo ? undefined : inferRepoName(head, repoHints);
+    let contentRepo: string | undefined;
+    if (!pathRepo && repoHints.length > 0) {
+      const full = await readFile(absolutePath, "utf8");
+      contentRepo = inferRepoName(full, repoHints);
+    }
     return {
       id: documentId(absolutePath),
       title: override ?? sourceTitle,

@@ -72,7 +72,10 @@ async function scanOpenCodeDbPath(
     return [];
   }
 
-  if (stats.size > MAX_OPENCODE_DB_BYTES) return [];
+  if (stats.size > MAX_OPENCODE_DB_BYTES) {
+    console.warn(`SpecHub: skipping OpenCode DB at ${dbPath} (${(stats.size / 1024 / 1024).toFixed(1)} MB exceeds ${MAX_OPENCODE_DB_BYTES / 1024 / 1024} MB limit)`);
+    return [];
+  }
 
   const db = await openDatabase(dbPath);
   try {
