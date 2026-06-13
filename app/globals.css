@@ -1614,6 +1614,9 @@ button:disabled,
 
 .modal.doc-modal .modal-body {
   padding: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
 }
 
 .modal.doc-modal .modal-body .markdown-body {
@@ -1622,12 +1625,14 @@ button:disabled,
   border: none;
   border-radius: 0;
   box-shadow: none;
+  flex: 1;
 }
 
 .modal.doc-modal .modal-body .html-frame {
   max-width: none;
   border: none;
   border-radius: 0;
+  flex: 1;
 }
 
 .modal-bar {
