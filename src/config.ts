@@ -1,6 +1,6 @@
 import { access, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import os from "node:os";
 import path from "node:path";
+import { expandHome } from "./paths.js";
 import type { SpecHubConfig, SpecHubSource } from "./types.js";
 
 export const DEFAULT_IGNORE_PATTERNS = [
@@ -20,6 +20,7 @@ export const DEFAULT_DOC_PATTERNS = [
   "docs/superpowers/plans/**/*.{md,markdown,html}",
   "docs/superpowers/specs/**/*.{md,markdown,html}",
   "docs/superpowers/**/*.{md,html}",
+  // Typo-tolerant variants of "superpowers" seen in the wild:
   "docs/supperpowers/plans/**/*.{md,markdown,html}",
   "docs/supperpowers/specs/**/*.{md,markdown,html}",
   "docs/supperpowers/**/*.{md,html}",
@@ -48,11 +49,7 @@ const DEFAULT_AGENT_DOC_PATTERNS = [
 
 const DEFAULT_AGENT_SOURCE_NAMES = ["opencode", "codex", "claude", "cursor", "augment", "windsurf"];
 
-export function expandHome(input: string): string {
-  if (input === "~") return os.homedir();
-  if (input.startsWith("~/")) return path.join(os.homedir(), input.slice(2));
-  return input;
-}
+export { expandHome } from "./paths.js";
 
 export function defaultConfig(): SpecHubConfig {
   const roots = ["~/workspace", "~/.multica/server"].map(expandHome);

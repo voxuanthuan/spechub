@@ -1,18 +1,12 @@
 import { spawn } from "node:child_process";
 import { existsSync, readFileSync } from "node:fs";
-import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { expandHome } from "./paths.js";
 
 export interface UpdateOptions {
   branch?: string;
   installDir?: string;
-}
-
-function expandHome(input: string): string {
-  if (input === "~") return os.homedir();
-  if (input.startsWith("~/")) return path.join(os.homedir(), input.slice(2));
-  return input;
 }
 
 function isSpecHubCheckout(dir: string): boolean {

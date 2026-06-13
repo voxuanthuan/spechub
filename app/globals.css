@@ -2228,3 +2228,42 @@ button:disabled,
   opacity: 1;
   transform: translateY(0);
 }
+
+/* Skip-to-content link for keyboard/screen-reader users */
+.skip-to-content {
+  position: absolute;
+  top: -100%;
+  left: 0;
+  background: var(--accent);
+  color: var(--accent-ink);
+  padding: 8px 16px;
+  z-index: 1000;
+  font-weight: 600;
+  border-radius: 0 0 8px 0;
+}
+
+.skip-to-content:focus {
+  top: 0;
+}
+
+/* Error boundary fallback */
+.error-boundary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100vh;
+  gap: 12px;
+  font-family: var(--font-ui);
+  color: var(--c-ink);
+}
+
+.error-boundary strong {
+  font-size: 1.2rem;
+}
+
+.error-boundary p {
+  color: var(--c-ink-2);
+  max-width: 400px;
+  text-align: center;
+}

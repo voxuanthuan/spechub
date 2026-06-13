@@ -1,18 +1,17 @@
 import { createHash } from "node:crypto";
+import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import fg from "fast-glob";
+import micromatch from "micromatch";
 import { defaultConfig, normalizeOverridePath } from "./config.js";
 import { scanOpenCodePlanSource } from "./opencode.js";
+import { findHintByPath, inferRepoFromContent, normalizePath, type RepoHint } from "./paths.js";
 import type { DocumentCategory, DocumentKind, DocumentMeta, SpecHubConfig, SpecHubSource } from "./types.js";
 
 const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"]);
 const LOCAL_AGENT_DISCOVERY_DEPTH = 6;
-
-interface RepoHint {
-  root: string;
-  name: string;
-}
+const TITLE_READ_BYTES = 4096;
 
 export async function scanDocuments(config: Partial<SpecHubConfig> = {}): Promise<DocumentMeta[]> {
   const defaults = defaultConfig();
@@ -42,7 +41,7 @@ export async function scanDocuments(config: Partial<SpecHubConfig> = {}): Promis
     : [];
   const docs = await Promise.all(
     [...sources, ...localAgentSources].map((source) =>
-      scanSource(source, resolved.ignorePatterns, resolved.titleOverrides, repoHints)
+      scanSource(source, resolved.ignorePatterns, resolved.titleOverrides, repoHints, resolved.maxPlanSessions)
     )
   );
 
@@ -64,10 +63,11 @@ async function scanSource(
   source: SpecHubSource,
   ignorePatterns: string[],
   titleOverrides: Record<string, string>,
-  repoHints: RepoHint[]
+  repoHints: RepoHint[],
+  maxPlanSessions?: number
 ): Promise<DocumentMeta[]> {
   if (source.mode === "opencode-db") {
-    return scanOpenCodePlanSource(source, titleOverrides, repoHints);
+    return scanOpenCodePlanSource(source, titleOverrides, repoHints, maxPlanSessions);
   }
 
   if (source.mode === "direct") {
@@ -262,6 +262,16 @@ async function scanRepository(
   return docs.filter((doc): doc is DocumentMeta => Boolean(doc));
 }
 
+async function readHead(filePath: string, bytes: number): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    const stream = createReadStream(filePath, { encoding: "utf8", end: bytes - 1 });
+    stream.on("data", (chunk: string | Buffer) => chunks.push(Buffer.from(chunk)));
+    stream.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
+    stream.on("error", reject);
+  });
+}
+
 async function createDocumentMeta(
   repoRoot: string,
   relativePath: string,
@@ -276,11 +286,15 @@ async function createDocumentMeta(
   const kind: DocumentKind = MARKDOWN_EXTENSIONS.has(extension) ? "markdown" : extension === ".html" ? "html" : "markdown";
 
   try {
-    const [stats, raw] = await Promise.all([stat(absolutePath), readFile(absolutePath, "utf8")]);
-    const sourceTitle = extractTitle(raw, relativePath, kind);
+    const [stats, head] = await Promise.all([stat(absolutePath), readHead(absolutePath, TITLE_READ_BYTES)]);
+    const sourceTitle = extractTitle(head, relativePath, kind);
     const override = titleOverrides[normalizeOverridePath(absolutePath)];
-    const pathRepo = findRepoByPath(absolutePath, repoHints);
-    const contentRepo = pathRepo ? undefined : inferRepoName(raw, repoHints);
+    const pathRepo = findHintByPath(absolutePath, repoHints);
+    let contentRepo: string | undefined;
+    if (!pathRepo && repoHints.length > 0) {
+      const full = await readFile(absolutePath, "utf8");
+      contentRepo = inferRepoName(full, repoHints);
+    }
     return {
       id: documentId(absolutePath),
       title: override ?? sourceTitle,
@@ -312,25 +326,8 @@ function isWithinRootScope(doc: DocumentMeta, roots: string[], repoHints: RepoHi
   return repoHints.some((hint) => hint.name === doc.repoName);
 }
 
-function findRepoByPath(absolutePath: string, repoHints: RepoHint[]): RepoHint | undefined {
-  if (repoHints.length === 0) return undefined;
-  const normalized = normalizePath(path.resolve(absolutePath));
-  return [...repoHints]
-    .sort((left, right) => right.root.length - left.root.length)
-    .find((repo) => normalized === repo.root || normalized.startsWith(`${repo.root}/`));
-}
-
 function inferRepoName(raw: string, repoHints: RepoHint[]): string | undefined {
-  const normalizedRaw = normalizePath(raw);
-  const byRootLength = [...repoHints].sort((left, right) => right.root.length - left.root.length);
-  const exactRoot = byRootLength.find((repo) => normalizedRaw.includes(repo.root));
-  if (exactRoot) return exactRoot.name;
-
-  return byRootLength.find((repo) => new RegExp(`(^|[^\\w-])${escapeRegExp(repo.name)}([^\\w-]|$)`, "i").test(raw))?.name;
-}
-
-function escapeRegExp(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return inferRepoFromContent(raw, repoHints)?.name;
 }
 
 function extractTitle(raw: string, relativePath: string, kind: DocumentKind): string {
@@ -386,15 +383,13 @@ function toFastGlobIgnore(ignorePatterns: string[]): string[] {
 }
 
 function isIgnored(relativePath: string, ignorePatterns: string[]): boolean {
-  const segments = normalizePath(relativePath).split("/");
-  return ignorePatterns.some((pattern) => {
-    if (!pattern.includes("*") && !pattern.includes("/")) return segments.includes(pattern);
-    return fg.isDynamicPattern(pattern) ? false : segments.includes(pattern);
-  });
-}
-
-function normalizePath(input: string): string {
-  return input.split(path.sep).join("/");
+  const normalized = normalizePath(relativePath);
+  const segments = normalized.split("/");
+  const simple = ignorePatterns.filter((pattern) => !pattern.includes("*") && !pattern.includes("/"));
+  if (simple.some((pattern) => segments.includes(pattern))) return true;
+  const globs = ignorePatterns.filter((pattern) => pattern.includes("*") || pattern.includes("/"));
+  if (globs.length > 0 && micromatch.isMatch(normalized, globs)) return true;
+  return false;
 }
 
 async function pathExists(input: string): Promise<boolean> {

@@ -3,12 +3,10 @@ import { readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import initSqlJs from "sql.js";
 import { normalizeOverridePath } from "./config.js";
+import { findHintByPath, inferRepoFromContent, normalizePath, type RepoHint } from "./paths.js";
 import type { DocumentMeta, SpecHubSource } from "./types.js";
 
-interface RepoHint {
-  root: string;
-  name: string;
-}
+const MAX_OPENCODE_DB_BYTES = 50 * 1024 * 1024;
 
 interface SessionRow {
   id: string;
@@ -26,15 +24,17 @@ interface TextPartRow {
   part_data: string;
 }
 
-const MAX_PLAN_SESSIONS = 200;
+const DEFAULT_MAX_PLAN_SESSIONS = 200;
+export { type RepoHint } from "./paths.js";
 
 export async function scanOpenCodePlanSource(
   source: SpecHubSource,
   titleOverrides: Record<string, string>,
-  repoHints: RepoHint[]
+  repoHints: RepoHint[],
+  maxSessions = DEFAULT_MAX_PLAN_SESSIONS
 ): Promise<DocumentMeta[]> {
   const docs = await Promise.all(
-    source.roots.map(async (root) => scanOpenCodeDbPath(await resolveOpenCodeDbPath(root), source, titleOverrides, repoHints))
+    source.roots.map(async (root) => scanOpenCodeDbPath(await resolveOpenCodeDbPath(root), source, titleOverrides, repoHints, maxSessions))
   );
   return docs.flat();
 }
@@ -62,12 +62,18 @@ async function scanOpenCodeDbPath(
   dbPath: string,
   source: SpecHubSource,
   titleOverrides: Record<string, string>,
-  repoHints: RepoHint[]
+  repoHints: RepoHint[],
+  maxSessions: number
 ): Promise<DocumentMeta[]> {
   let stats;
   try {
     stats = await stat(dbPath);
   } catch {
+    return [];
+  }
+
+  if (stats.size > MAX_OPENCODE_DB_BYTES) {
+    console.warn(`SpecHub: skipping OpenCode DB at ${dbPath} (${(stats.size / 1024 / 1024).toFixed(1)} MB exceeds ${MAX_OPENCODE_DB_BYTES / 1024 / 1024} MB limit)`);
     return [];
   }
 
@@ -81,7 +87,7 @@ async function scanOpenCodeDbPath(
         FROM session
         WHERE agent = 'plan' OR agent = 'explore' OR agent = '' OR agent IS NULL
         ORDER BY COALESCE(time_updated, time_created, 0) DESC
-        LIMIT ${MAX_PLAN_SESSIONS}
+        LIMIT ${maxSessions}
       `
     );
 
@@ -219,24 +225,7 @@ function resolveRepo(directory: string | undefined, raw: string, repoHints: Repo
     if (matchedHint) return matchedHint;
     return { root: directory, name: path.basename(directory) };
   }
-  return inferRepo(raw, repoHints);
-}
-
-function findHintByPath(absolutePath: string, repoHints: RepoHint[]): RepoHint | undefined {
-  if (repoHints.length === 0) return undefined;
-  const normalized = normalizePath(path.resolve(absolutePath));
-  return [...repoHints]
-    .sort((left, right) => right.root.length - left.root.length)
-    .find((repo) => normalized === repo.root || normalized.startsWith(`${repo.root}/`));
-}
-
-function inferRepo(raw: string, repoHints: RepoHint[]): RepoHint | undefined {
-  const normalizedRaw = normalizePath(raw);
-  const byRootLength = [...repoHints].sort((left, right) => right.root.length - left.root.length);
-  const exactRoot = byRootLength.find((repo) => normalizedRaw.includes(repo.root));
-  if (exactRoot) return exactRoot;
-
-  return byRootLength.find((repo) => new RegExp(`(^|[^\\w-])${escapeRegExp(repo.name)}([^\\w-]|$)`, "i").test(raw));
+  return inferRepoFromContent(raw, repoHints);
 }
 
 function cleanTitle(input: string): string {
@@ -245,12 +234,4 @@ function cleanTitle(input: string): string {
 
 function safeFilename(input: string): string {
   return input.replace(/[^a-zA-Z0-9._-]+/g, "-");
-}
-
-function normalizePath(input: string): string {
-  return input.split(path.sep).join("/");
-}
-
-function escapeRegExp(input: string): string {
-  return input.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
