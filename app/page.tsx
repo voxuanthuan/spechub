@@ -1,14 +1,17 @@
 "use client";
 
-import { useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { ErrorBoundary } from "./components/ErrorBoundary.js";
+import { AnnotationToolbar } from "./components/AnnotationToolbar.js";
+import { AnnotationPanel } from "./components/AnnotationPanel.js";
+import { CommentDialog } from "./components/CommentDialog.js";
 import {
-  ChevronIcon, CloseIcon, CodeIcon, CopyIcon, EyeOffIcon,
+  AnnotationsIcon, ChevronIcon, CloseIcon, CodeIcon, CopyIcon, EyeOffIcon,
   ExternalIcon, FileIcon, FolderIcon, FullscreenIcon, MoreIcon,
   PlusCircleIcon, PlusIcon, RefreshIcon, SearchIcon, SettingsIcon,
   StarIcon, TrashIcon
 } from "./components/icons/index.js";
-import { fetchDocs, fetchDocument, fetchState, isDesktop, patchState } from "./lib/api.js";
+import { deleteAnnotation as apiDeleteAnnotation, fetchAnnotations, fetchDocs, fetchDocument, fetchState, isDesktop, patchState, saveAnnotation } from "./lib/api.js";
 import { filterDocs, normalizeRepoNames, summarizeRepos } from "./lib/filters.js";
 import { formatDate, formatLiveTime } from "./lib/format.js";
 import { sanitizeMarkdown } from "./lib/sanitize.js";
@@ -109,6 +112,12 @@ export default function Home() {
   const [liveUpdatedAt, setLiveUpdatedAt] = useState<number | null>(null);
   const [livePulse, setLivePulse] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
+  const [annotations, setAnnotations] = useState<import("./lib/types.js").Annotation[]>([]);
+  const [annotationPanelOpen, setAnnotationPanelOpen] = useState(false);
+  const [selectedAnnotationId, setSelectedAnnotationId] = useState<string | null>(null);
+  const [commentDraft, setCommentDraft] = useState<{ selectedText: string; startOffset: number; endOffset: number } | null>(null);
+  const previewContentRef = useRef<HTMLDivElement>(null);
+  const fullViewContentRef = useRef<HTMLDivElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const livePulseTimer = useRef<number | null>(null);
@@ -367,12 +376,62 @@ export default function Home() {
     try {
       const doc = await fetchDocument(id);
       setSelectedDoc(doc);
+      loadAnnotations(id);
     } catch {
       setSelectedDoc(null);
+      setAnnotations([]);
       setError("Document no longer exists. Refresh the index to remove stale entries.");
     } finally {
       setDetailLoading(false);
     }
+  }
+
+  function loadAnnotations(docId: string) {
+    fetchAnnotations(docId).then(setAnnotations).catch(() => setAnnotations([]));
+  }
+
+  const handleAnnotate = useCallback((type: import("./lib/types.js").AnnotationType, selectedText: string, startOffset: number, endOffset: number) => {
+    if (!selectedDoc) return;
+    if (type === "comment") {
+      setCommentDraft({ selectedText, startOffset, endOffset });
+      return;
+    }
+    const annotation: Omit<import("./lib/types.js").Annotation, "docId"> = {
+      id: crypto.randomUUID(),
+      type,
+      selectedText,
+      text: "",
+      startOffset,
+      endOffset,
+      createdAt: Date.now()
+    };
+    saveAnnotation(selectedDoc.id, annotation).then((saved) => {
+      setAnnotations((prev) => [...prev, saved]);
+      if (!annotationPanelOpen) setAnnotationPanelOpen(true);
+    }).catch(() => {});
+  }, [selectedDoc, annotationPanelOpen]);
+
+  function handleCommentSubmit(text: string) {
+    if (!selectedDoc || !commentDraft) return;
+    const annotation: Omit<import("./lib/types.js").Annotation, "docId"> = {
+      id: crypto.randomUUID(),
+      type: "comment",
+      selectedText: commentDraft.selectedText,
+      text,
+      startOffset: commentDraft.startOffset,
+      endOffset: commentDraft.endOffset,
+      createdAt: Date.now()
+    };
+    saveAnnotation(selectedDoc.id, annotation).then((saved) => {
+      setAnnotations((prev) => [...prev, saved]);
+      setCommentDraft(null);
+      if (!annotationPanelOpen) setAnnotationPanelOpen(true);
+    }).catch(() => {});
+  }
+
+  function handleDeleteAnnotation(annotationId: string) {
+    setAnnotations((prev) => prev.filter((ann) => ann.id !== annotationId));
+    if (selectedAnnotationId === annotationId) setSelectedAnnotationId(null);
   }
 
   async function copySelectedPath() {
@@ -969,6 +1028,10 @@ export default function Home() {
                     </button>
                   </div>
                 </div>
+                <button className="btn icon-label" type="button" disabled={!selectedDoc} aria-pressed={annotationPanelOpen} onClick={() => setAnnotationPanelOpen((open) => !open)}>
+                  <AnnotationsIcon />
+                  {annotations.length > 0 ? `Annotations (${annotations.length})` : "Annotate"}
+                </button>
                 <button className="btn primary" type="button" disabled={!selectedDoc} title="Open full reading view (F)" onClick={() => setFullView(true)}>
                   <FullscreenIcon />
                   Full view
@@ -977,8 +1040,23 @@ export default function Home() {
             </div>
           </div>
 
-          <div className={`preview-wrap${selectedDoc ? "" : " empty"}`} title={selectedDoc ? "Double-click for full view" : undefined} onDoubleClick={() => selectedDoc && setFullView(true)}>
-            {detailLoading ? <PreviewSkeleton /> : renderedPreview}
+          <div className={`preview-and-annotations${annotationPanelOpen ? " with-panel" : ""}`}>
+            <div className={`preview-wrap${selectedDoc ? "" : " empty"}`} ref={previewContentRef} title={selectedDoc ? "Double-click for full view" : undefined} onDoubleClick={() => selectedDoc && setFullView(true)}>
+              {detailLoading ? <PreviewSkeleton /> : renderedPreview}
+              {selectedDoc && <AnnotationToolbar containerRef={previewContentRef} onAnnotate={handleAnnotate} />}
+            </div>
+            {annotationPanelOpen && selectedDoc && (
+              <AnnotationPanel
+                docId={selectedDoc.id}
+                docTitle={selectedDoc.title}
+                docPath={selectedDoc.absolutePath}
+                annotations={annotations}
+                selectedAnnotationId={selectedAnnotationId}
+                onSelectAnnotation={setSelectedAnnotationId}
+                onDeleteAnnotation={handleDeleteAnnotation}
+                onClose={() => setAnnotationPanelOpen(false)}
+              />
+            )}
           </div>
             </>
           ) : (
@@ -1032,7 +1110,10 @@ export default function Home() {
               </button>
             </div>
           </div>
-          <div className="modal-body">{fullView ? renderPreview(selectedDoc) : null}</div>
+          <div className="modal-body" ref={fullViewContentRef}>
+            {fullView ? renderPreview(selectedDoc) : null}
+            {fullView && selectedDoc && <AnnotationToolbar containerRef={fullViewContentRef} onAnnotate={handleAnnotate} />}
+          </div>
         </div>
       </div>
 
@@ -1167,6 +1248,14 @@ export default function Home() {
           </div>
         </div>
       </div>
+
+      {commentDraft && (
+        <CommentDialog
+          selectedText={commentDraft.selectedText}
+          onSubmit={handleCommentSubmit}
+          onCancel={() => setCommentDraft(null)}
+        />
+      )}
 
       <div className="toast" aria-live="polite" data-open={Boolean(toast)}>
         {toast}

@@ -3,6 +3,7 @@ import { access, readFile, stat } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { addAnnotation, formatFeedbackForAgent, readAnnotations, removeAnnotation, type AgentFeedback, type StoredAnnotation } from "./annotations.js";
 import express, { type Express, type Request, type Response } from "express";
 import {
   DEFAULT_CONFIG_PATH,
@@ -159,6 +160,61 @@ export function createApp(config: RuntimeSpecHubConfig = {}, index: DocumentInde
     }
     await index.refresh();
     response.json(await describeConfig(config));
+  }));
+
+  app.get("/api/docs/:id/annotations", asyncRoute(async (request, response) => {
+    const doc = await index.findById(request.params.id);
+    if (!doc) {
+      notFound(response);
+      return;
+    }
+    const annotations = await readAnnotations(doc.id);
+    response.json({ annotations });
+  }));
+
+  app.post("/api/docs/:id/annotations", asyncRoute(async (request, response) => {
+    const doc = await index.findById(request.params.id);
+    if (!doc) {
+      notFound(response);
+      return;
+    }
+    const body = request.body;
+    if (!body || typeof body.id !== "string" || typeof body.type !== "string") {
+      response.status(400).json({ error: "Invalid annotation payload." });
+      return;
+    }
+    const annotation: StoredAnnotation = {
+      id: body.id,
+      docId: doc.id,
+      type: body.type,
+      selectedText: typeof body.selectedText === "string" ? body.selectedText : "",
+      text: typeof body.text === "string" ? body.text : "",
+      startOffset: typeof body.startOffset === "number" ? body.startOffset : 0,
+      endOffset: typeof body.endOffset === "number" ? body.endOffset : 0,
+      createdAt: typeof body.createdAt === "number" ? body.createdAt : Date.now()
+    };
+    const saved = await addAnnotation(doc.id, annotation);
+    response.json({ annotation: saved });
+  }));
+
+  app.delete("/api/docs/:id/annotations/:annotationId", asyncRoute(async (request, response) => {
+    const doc = await index.findById(request.params.id);
+    if (!doc) {
+      notFound(response);
+      return;
+    }
+    await removeAnnotation(doc.id, request.params.annotationId);
+    response.json({ ok: true });
+  }));
+
+  app.post("/api/agent/feedback", asyncRoute(async (request, response) => {
+    const body = request.body as AgentFeedback | undefined;
+    if (!body || !body.docId || !body.agent || !Array.isArray(body.annotations)) {
+      response.status(400).json({ error: "Invalid feedback payload." });
+      return;
+    }
+    const formatted = formatFeedbackForAgent(body);
+    response.json({ formatted });
   }));
 
   app.post("/api/docs/:id/open-folder", asyncRoute(async (request, response) => {
