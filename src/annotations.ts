@@ -87,7 +87,7 @@ export function formatFeedbackForAgent(feedback: AgentFeedback): string {
     const typeLabel = annotation.type === "deletion" ? "DELETE" : annotation.type === "comment" ? "COMMENT" : "HIGHLIGHT";
     lines.push(`## [${typeLabel}]`);
     lines.push("");
-    lines.push(`> ${annotation.selectedText}`);
+    lines.push(annotation.selectedText.split("\n").map((line) => `> ${line}`).join("\n"));
     lines.push("");
     if (annotation.text) {
       lines.push(annotation.text);

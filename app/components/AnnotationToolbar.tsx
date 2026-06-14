@@ -39,11 +39,12 @@ export function AnnotationToolbar({ containerRef, onAnnotate }: AnnotationToolba
       const rect = range.getBoundingClientRect();
       const containerRect = container.getBoundingClientRect();
 
-      const bodyText = container.textContent ?? "";
+      const rawText = sel.toString();
+      const leadingWhitespace = rawText.length - rawText.trimStart().length;
       const preRange = document.createRange();
       preRange.setStart(container, 0);
       preRange.setEnd(range.startContainer, range.startOffset);
-      const startOffset = preRange.toString().length;
+      const startOffset = preRange.toString().length + leadingWhitespace;
       const endOffset = startOffset + text.length;
 
       setSelection({ text, start: startOffset, end: endOffset });
@@ -62,6 +63,7 @@ export function AnnotationToolbar({ containerRef, onAnnotate }: AnnotationToolba
     if (!visible) return;
     function handlePointerDown(event: PointerEvent) {
       if (toolbarRef.current?.contains(event.target as Node)) return;
+      setVisible(false);
     }
     document.addEventListener("pointerdown", handlePointerDown);
     return () => document.removeEventListener("pointerdown", handlePointerDown);
