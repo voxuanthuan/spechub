@@ -59,6 +59,29 @@ export interface SpecHubState {
   hiddenRepos: string[];
 }
 
+export type AnnotationType = "comment" | "highlight" | "deletion";
+
+export type AgentOrigin = "claude-code" | "opencode" | "codex" | "copilot-cli" | "gemini-cli";
+
+export interface Annotation {
+  id: string;
+  docId: string;
+  type: AnnotationType;
+  selectedText: string;
+  text: string;
+  startOffset: number;
+  endOffset: number;
+  createdAt: number;
+}
+
+export interface AgentFeedbackPayload {
+  docId: string;
+  docTitle: string;
+  docPath: string;
+  annotations: Annotation[];
+  agent: AgentOrigin;
+}
+
 export interface AccentTokens {
   accent: string;
   strong: string;
