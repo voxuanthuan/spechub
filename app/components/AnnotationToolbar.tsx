@@ -49,8 +49,8 @@ export function AnnotationToolbar({ containerRef, onAnnotate }: AnnotationToolba
 
       setSelection({ text, start: startOffset, end: endOffset });
       setPosition({
-        top: rect.top - containerRect.top - 44,
-        left: rect.left - containerRect.left + rect.width / 2
+        top: rect.top - containerRect.top + container.scrollTop - 44,
+        left: rect.left - containerRect.left + container.scrollLeft + rect.width / 2
       });
       setVisible(true);
     }
