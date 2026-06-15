@@ -34,7 +34,7 @@ Express app that **serves the static Next.js export from `out/`** and exposes a 
 
 `scanDocuments` (`src/scanner.ts`) is the core: it walks configured `sources` (modes
 `repositories` | `direct` | `opencode-db`) via fast-glob and produces `DocumentMeta[]`.
-OpenCode plan sessions are read from a sql.js SQLite DB in `src/opencode.ts`. Markdown is
+OpenCode plan sessions are read from a SQLite DB via `better-sqlite3` in `src/opencode.ts`. Markdown is
 rendered server-side and sanitized in `src/markdown.ts`; the data model lives in `src/types.ts`.
 
 Two UIs exist: `app/` is the current Next.js dashboard (exported to `out/`); `src/web/` is a
