@@ -34,6 +34,9 @@
     "react-dom": "^19.2.7",
     "sanitize-html": "^2.13.0"
   },
+  "pnpm": {
+    "onlyBuiltDependencies": ["better-sqlite3"]
+  },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.2",
     "@types/better-sqlite3": "^7.6.13",
