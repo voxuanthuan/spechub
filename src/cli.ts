@@ -1,9 +1,5 @@
 #!/usr/bin/env node
 import { Command } from "commander";
-import { DEFAULT_CONFIG_PATH, resolveConfig } from "./config.js";
-import { openBrowser } from "./opener.js";
-import { startServer } from "./server.js";
-import { runUpdate } from "./update.js";
 
 interface StartOptions {
   open?: boolean;
@@ -13,6 +9,9 @@ interface StartOptions {
 }
 
 async function startDashboard(options: StartOptions): Promise<void> {
+  const { DEFAULT_CONFIG_PATH, resolveConfig } = await import("./config.js");
+  const { startServer } = await import("./server.js");
+
   const config = await resolveConfig({
     configPath: options.config,
     roots: options.roots
@@ -30,6 +29,7 @@ async function startDashboard(options: StartOptions): Promise<void> {
   console.log(`SpecHub dashboard: ${url}`);
 
   if (options.open) {
+    const { openBrowser } = await import("./opener.js");
     await openBrowser(url);
   }
 
@@ -56,6 +56,7 @@ program
   .option("--branch <branch>", "git branch to update from (default: main)")
   .action(async (options: { branch?: string }) => {
     try {
+      const { runUpdate } = await import("./update.js");
       await runUpdate({ branch: options.branch });
     } catch (error) {
       console.error(`SpecHub update failed: ${error instanceof Error ? error.message : String(error)}`);

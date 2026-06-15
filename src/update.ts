@@ -66,7 +66,11 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
   await run("git", ["pull", "--ff-only", "origin", branch], installDir);
 
   console.log("Installing dependencies...");
-  await run("pnpm", ["install", "--frozen-lockfile"], installDir);
+  try {
+    await run("pnpm", ["install", "--frozen-lockfile"], installDir);
+  } catch {
+    await run("pnpm", ["install"], installDir);
+  }
 
   console.log("Building SpecHub...");
   await run("pnpm", ["build"], installDir);
