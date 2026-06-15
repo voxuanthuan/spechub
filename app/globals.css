@@ -1617,6 +1617,7 @@ button:disabled,
   flex: 1;
   display: flex;
   flex-direction: column;
+  position: relative;
 }
 
 .modal.doc-modal .modal-body .markdown-body {
