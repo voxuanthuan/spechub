@@ -1632,9 +1632,7 @@ button:disabled,
 }
 
 .modal.doc-modal .modal-body .html-frame {
-  max-width: 900px;
-  width: 100%;
-  margin: 0 auto;
+  max-width: none;
   border: none;
   border-radius: 0;
   flex: 1;
