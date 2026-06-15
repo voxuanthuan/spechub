@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
 import { EventEmitter } from "node:events";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import initSqlJs from "sql.js";
+import Database from "better-sqlite3";
 import request from "supertest";
 import { createApp } from "../src/server.js";
 import type { DocumentIndex } from "../src/index-service.js";
@@ -346,9 +346,8 @@ async function waitFor(assertion: () => void | Promise<void>, timeoutMs = 1_000)
 }
 
 async function writeOpenCodePlanDb(dbPath: string, repo: string): Promise<void> {
-  const SQL = await initSqlJs();
-  const db = new SQL.Database();
-  db.run(`
+  const db = new Database(dbPath);
+  db.exec(`
     CREATE TABLE session (
       id TEXT PRIMARY KEY,
       directory TEXT NOT NULL,
@@ -373,30 +372,29 @@ async function writeOpenCodePlanDb(dbPath: string, repo: string): Promise<void> 
       data TEXT NOT NULL
     );
   `);
-  db.run("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)", [
+  db.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)").run(
     "ses_plan",
     repo,
     "Review import mutation",
     "plan",
     1_700_000_000_000,
     1_700_000_100_000
-  ]);
-  db.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
+  );
+  db.prepare("INSERT INTO message VALUES (?, ?, ?, ?, ?)").run(
     "msg_assistant",
     "ses_plan",
     1_700_000_000_002,
     1_700_000_100_000,
     JSON.stringify({ role: "assistant", agent: "plan" })
-  ]);
-  db.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+  );
+  db.prepare("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)").run(
     "prt_assistant",
     "msg_assistant",
     "ses_plan",
     1_700_000_000_002,
     1_700_000_100_000,
     JSON.stringify({ type: "text", text: "## Final Plan\n\nUse repository path `" + repo + "`." })
-  ]);
+  );
 
-  await writeFile(dbPath, db.export());
   db.close();
 }

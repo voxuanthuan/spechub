@@ -1,12 +1,10 @@
 import { createHash } from "node:crypto";
-import { readFile, stat } from "node:fs/promises";
+import { stat } from "node:fs/promises";
 import path from "node:path";
-import initSqlJs from "sql.js";
+import Database from "better-sqlite3";
 import { normalizeOverridePath } from "./config.js";
 import { findHintByPath, inferRepoFromContent, normalizePath, type RepoHint } from "./paths.js";
 import type { DocumentMeta, SpecHubSource } from "./types.js";
-
-const MAX_OPENCODE_DB_BYTES = 50 * 1024 * 1024;
 
 interface SessionRow {
   id: string;
@@ -40,12 +38,12 @@ export async function scanOpenCodePlanSource(
 }
 
 export async function readOpenCodePlanContent(dbPath: string, sessionId: string): Promise<string> {
-  const db = await openDatabase(dbPath);
+  const db = openDatabase(dbPath);
   try {
     const session = selectRows<SessionRow>(
       db,
       "SELECT id, title, directory, time_created, time_updated FROM session WHERE id = ? AND (agent = 'plan' OR agent = 'explore' OR agent = '' OR agent IS NULL) LIMIT 1",
-      [sessionId]
+      sessionId
     )[0];
     if (!session) {
       throw new Error(`OpenCode plan session not found: ${sessionId}`);
@@ -72,12 +70,7 @@ async function scanOpenCodeDbPath(
     return [];
   }
 
-  if (stats.size > MAX_OPENCODE_DB_BYTES) {
-    console.warn(`SpecHub: skipping OpenCode DB at ${dbPath} (${(stats.size / 1024 / 1024).toFixed(1)} MB exceeds ${MAX_OPENCODE_DB_BYTES / 1024 / 1024} MB limit)`);
-    return [];
-  }
-
-  const db = await openDatabase(dbPath);
+  const db = openDatabase(dbPath);
   try {
     if (!hasRequiredTables(db)) return [];
     const sessions = selectRows<SessionRow>(
@@ -105,10 +98,8 @@ async function scanOpenCodeDbPath(
   }
 }
 
-async function openDatabase(dbPath: string) {
-  const SQL = await initSqlJs();
-  const raw = await readFile(dbPath);
-  return new SQL.Database(new Uint8Array(raw));
+function openDatabase(dbPath: string): Database.Database {
+  return new Database(dbPath, { readonly: true, fileMustExist: true });
 }
 
 async function resolveOpenCodeDbPath(root: string): Promise<string> {
@@ -117,7 +108,7 @@ async function resolveOpenCodeDbPath(root: string): Promise<string> {
   return path.join(resolved, "opencode.db");
 }
 
-function hasRequiredTables(db: initSqlJs.Database): boolean {
+function hasRequiredTables(db: Database.Database): boolean {
   const rows = selectRows<{ name: string }>(
     db,
     "SELECT name FROM sqlite_master WHERE type = 'table' AND name IN ('session', 'message', 'part')"
@@ -125,7 +116,7 @@ function hasRequiredTables(db: initSqlJs.Database): boolean {
   return new Set(rows.map((row) => row.name)).size === 3;
 }
 
-function readAssistantText(db: initSqlJs.Database, sessionId: string): string {
+function readAssistantText(db: Database.Database, sessionId: string): string {
   const rows = selectRows<TextPartRow>(
     db,
     `
@@ -140,7 +131,7 @@ function readAssistantText(db: initSqlJs.Database, sessionId: string): string {
       WHERE message.session_id = ?
       ORDER BY message.time_created ASC, part.id ASC
     `,
-    [sessionId]
+    sessionId
   );
 
   const chunks: string[] = [];
@@ -202,12 +193,9 @@ function formatPlanContent(session: SessionRow, text: string): string {
   return [`# ${title}`, metadata.length ? metadata.join("\n") : undefined, text.trim()].filter(Boolean).join("\n\n");
 }
 
-function selectRows<T extends object>(db: initSqlJs.Database, sql: string, params: initSqlJs.BindParams = []): T[] {
-  const result = db.exec(sql, params)[0];
-  if (!result) return [];
-  return result.values.map((values) =>
-    Object.fromEntries(result.columns.map((column, index) => [column, values[index]]))
-  ) as T[];
+function selectRows<T extends object>(db: Database.Database, sql: string, ...params: unknown[]): T[] {
+  const stmt = db.prepare(sql);
+  return stmt.all(...params) as T[];
 }
 
 function parseJsonObject(input: string): Record<string, unknown> {

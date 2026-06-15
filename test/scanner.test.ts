@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, writeFile } from "node:fs/promises";
 import os from "node:os";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import initSqlJs from "sql.js";
+import Database from "better-sqlite3";
 import { defaultConfig } from "../src/config.js";
 import { scanDocuments } from "../src/scanner.js";
 
@@ -517,9 +517,8 @@ describe("scanDocuments", () => {
 });
 
 async function writeOpenCodeDb(dbPath: string, repo: string): Promise<void> {
-  const SQL = await initSqlJs();
-  const db = new SQL.Database();
-  db.run(`
+  const db = new Database(dbPath);
+  db.exec(`
     CREATE TABLE session (
       id TEXT PRIMARY KEY,
       directory TEXT NOT NULL,
@@ -544,68 +543,67 @@ async function writeOpenCodeDb(dbPath: string, repo: string): Promise<void> {
       data TEXT NOT NULL
     );
   `);
-  db.run("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)", [
+  db.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)").run(
     "ses_plan",
     repo,
     "Review import mutation",
     "plan",
     1_700_000_000_000,
     1_700_000_100_000
-  ]);
-  db.run("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)", [
+  );
+  db.prepare("INSERT INTO session VALUES (?, ?, ?, ?, ?, ?)").run(
     "ses_build",
     repo,
     "Build work",
     "build",
     1_700_000_000_000,
     1_700_000_100_000
-  ]);
-  db.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
+  );
+  db.prepare("INSERT INTO message VALUES (?, ?, ?, ?, ?)").run(
     "msg_user",
     "ses_plan",
     1_700_000_000_001,
     1_700_000_000_001,
     JSON.stringify({ role: "user", agent: "plan" })
-  ]);
-  db.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
+  );
+  db.prepare("INSERT INTO message VALUES (?, ?, ?, ?, ?)").run(
     "msg_assistant",
     "ses_plan",
     1_700_000_000_002,
     1_700_000_100_000,
     JSON.stringify({ role: "assistant", agent: "plan" })
-  ]);
-  db.run("INSERT INTO message VALUES (?, ?, ?, ?, ?)", [
+  );
+  db.prepare("INSERT INTO message VALUES (?, ?, ?, ?, ?)").run(
     "msg_build",
     "ses_build",
     1_700_000_000_003,
     1_700_000_100_000,
     JSON.stringify({ role: "assistant", agent: "build" })
-  ]);
-  db.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+  );
+  db.prepare("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)").run(
     "prt_user",
     "msg_user",
     "ses_plan",
     1_700_000_000_001,
     1_700_000_000_001,
     JSON.stringify({ type: "text", text: "Plan the import mutation" })
-  ]);
-  db.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+  );
+  db.prepare("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)").run(
     "prt_assistant",
     "msg_assistant",
     "ses_plan",
     1_700_000_000_002,
     1_700_000_100_000,
     JSON.stringify({ type: "text", text: "## Final Plan\n\nUse repository path `" + repo + "` and update the GraphQL resolver." })
-  ]);
-  db.run("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)", [
+  );
+  db.prepare("INSERT INTO part VALUES (?, ?, ?, ?, ?, ?)").run(
     "prt_build",
     "msg_build",
     "ses_build",
     1_700_000_000_003,
     1_700_000_100_000,
     JSON.stringify({ type: "text", text: "Not a plan session" })
-  ]);
+  );
 
-  await writeFile(dbPath, db.export());
   db.close();
 }
