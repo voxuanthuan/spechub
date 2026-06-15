@@ -70,7 +70,12 @@ async function scanOpenCodeDbPath(
     return [];
   }
 
-  const db = openDatabase(dbPath);
+  let db: Database.Database;
+  try {
+    db = openDatabase(dbPath);
+  } catch {
+    return [];
+  }
   try {
     if (!hasRequiredTables(db)) return [];
     const sessions = selectRows<SessionRow>(
