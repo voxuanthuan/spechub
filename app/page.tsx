@@ -1104,15 +1104,39 @@ export default function Home() {
               <span>{selectedDoc?.absolutePath ?? ""}</span>
             </div>
             <div className="mb-actions">
+              <button
+                className="btn icon-label"
+                type="button"
+                disabled={!selectedDoc}
+                aria-pressed={annotationPanelOpen}
+                onClick={() => setAnnotationPanelOpen((open) => !open)}
+              >
+                <AnnotationsIcon />
+                {annotations.length > 0 ? `Annotations (${annotations.length})` : "Annotate"}
+              </button>
               <kbd>Esc</kbd>
               <button ref={fullViewCloseRef} className="modal-close" type="button" title="Close" aria-label="Close full view" onClick={() => setFullView(false)}>
                 <CloseIcon />
               </button>
             </div>
           </div>
-          <div className="modal-body" ref={fullViewContentRef}>
-            {fullView ? renderPreview(selectedDoc) : null}
-            {fullView && selectedDoc && <AnnotationToolbar containerRef={fullViewContentRef} onAnnotate={handleAnnotate} />}
+          <div className={`modal-body-wrap${annotationPanelOpen ? " with-panel" : ""}`}>
+            <div className="modal-body" ref={fullViewContentRef}>
+              {fullView ? renderPreview(selectedDoc) : null}
+              {fullView && selectedDoc && <AnnotationToolbar containerRef={fullViewContentRef} onAnnotate={handleAnnotate} />}
+            </div>
+            {fullView && annotationPanelOpen && selectedDoc && (
+              <AnnotationPanel
+                docId={selectedDoc.id}
+                docTitle={selectedDoc.title}
+                docPath={selectedDoc.absolutePath}
+                annotations={annotations}
+                selectedAnnotationId={selectedAnnotationId}
+                onSelectAnnotation={setSelectedAnnotationId}
+                onDeleteAnnotation={handleDeleteAnnotation}
+                onClose={() => setAnnotationPanelOpen(false)}
+              />
+            )}
           </div>
         </div>
       </div>

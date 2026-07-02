@@ -1612,6 +1612,23 @@ button:disabled,
   border: none;
 }
 
+.modal.doc-modal .modal-body-wrap {
+  flex: 1;
+  display: flex;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.modal.doc-modal .modal-body-wrap .modal-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.modal.doc-modal .modal-body-wrap .annotation-panel {
+  height: auto;
+  max-height: none;
+}
+
 .modal.doc-modal .modal-body {
   padding: 0;
   flex: 1;
