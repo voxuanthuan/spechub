@@ -2437,6 +2437,88 @@ button:disabled,
   margin: 0;
 }
 
+.ann-panel-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.ann-clear-all {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 8px;
+  font-size: 12px;
+  color: var(--c-ink-2);
+  background: transparent;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: background 0.1s, color 0.1s, border-color 0.1s;
+}
+
+.ann-clear-all svg {
+  width: 13px;
+  height: 13px;
+}
+
+.ann-clear-all:hover {
+  color: oklch(0.45 0.18 25);
+  border-color: oklch(0.8 0.1 25);
+  background: oklch(0.96 0.03 25);
+}
+
+[data-theme="dark"] .ann-clear-all:hover {
+  color: oklch(0.78 0.14 25);
+  border-color: oklch(0.4 0.1 25);
+  background: oklch(0.28 0.06 25);
+}
+
+.ann-clear-confirm {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.ann-clear-prompt {
+  color: var(--c-ink-2);
+}
+
+.ann-clear-yes,
+.ann-clear-no {
+  padding: 3px 9px;
+  font-size: 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--c-border);
+  cursor: pointer;
+}
+
+.ann-clear-yes {
+  color: #fff;
+  background: oklch(0.55 0.2 25);
+  border-color: oklch(0.55 0.2 25);
+}
+
+.ann-clear-yes:hover:not(:disabled) {
+  background: oklch(0.48 0.2 25);
+}
+
+.ann-clear-no {
+  color: var(--c-ink-2);
+  background: transparent;
+}
+
+.ann-clear-no:hover:not(:disabled) {
+  background: var(--c-surface);
+}
+
+.ann-clear-yes:disabled,
+.ann-clear-no:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
 .ann-empty {
   padding: 24px 14px;
   text-align: center;

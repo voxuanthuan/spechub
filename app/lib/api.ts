@@ -67,6 +67,13 @@ export async function deleteAnnotation(docId: string, annotationId: string): Pro
   if (!response.ok) throw new Error("Unable to delete annotation.");
 }
 
+export async function clearAnnotations(docId: string): Promise<void> {
+  const response = await fetch(`/api/docs/${docId}/annotations`, {
+    method: "DELETE"
+  });
+  if (!response.ok) throw new Error("Unable to clear annotations.");
+}
+
 export async function sendAgentFeedback(payload: AgentFeedbackPayload): Promise<{ formatted: string }> {
   const response = await fetch("/api/agent/feedback", {
     method: "POST",

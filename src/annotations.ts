@@ -65,6 +65,10 @@ export async function removeAnnotation(docId: string, annotationId: string): Pro
   await writeAnnotations(docId, filtered);
 }
 
+export async function clearAnnotations(docId: string): Promise<void> {
+  await writeAnnotations(docId, []);
+}
+
 const AGENT_LABELS: Record<AgentOrigin, string> = {
   "claude-code": "Claude Code",
   "opencode": "OpenCode",
