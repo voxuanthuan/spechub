@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { CloseIcon, SendIcon, TrashIcon } from "./icons/index.js";
-import { AGENT_NAMES, deleteAnnotation, sendAgentFeedback } from "../lib/api.js";
+import { AGENT_NAMES, clearAnnotations, deleteAnnotation, sendAgentFeedback } from "../lib/api.js";
 import type { AgentOrigin, Annotation } from "../lib/types.js";
 
 interface AnnotationPanelProps {
@@ -13,6 +13,7 @@ interface AnnotationPanelProps {
   selectedAnnotationId: string | null;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
+  onClearAnnotations: () => void;
   onClose: () => void;
 }
 
@@ -24,12 +25,15 @@ export function AnnotationPanel({
   selectedAnnotationId,
   onSelectAnnotation,
   onDeleteAnnotation,
+  onClearAnnotations,
   onClose
 }: AnnotationPanelProps) {
   const [feedbackAgent, setFeedbackAgent] = useState<AgentOrigin>("claude-code");
   const [feedbackResult, setFeedbackResult] = useState<string | null>(null);
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [feedbackCopied, setFeedbackCopied] = useState(false);
+  const [confirmingClear, setConfirmingClear] = useState(false);
+  const [clearing, setClearing] = useState(false);
 
   async function handleDelete(annotationId: string) {
     try {
@@ -37,6 +41,20 @@ export function AnnotationPanel({
       onDeleteAnnotation(annotationId);
     } catch {
       // Silently fail — annotation may already be deleted
+    }
+  }
+
+  async function handleClearAll() {
+    setClearing(true);
+    try {
+      await clearAnnotations(docId);
+      onClearAnnotations();
+      setFeedbackResult(null);
+    } catch {
+      // Silently fail — annotations may already be gone
+    } finally {
+      setClearing(false);
+      setConfirmingClear(false);
     }
   }
 
@@ -83,9 +101,44 @@ export function AnnotationPanel({
     <div className="annotation-panel">
       <div className="ann-panel-header">
         <h3>Annotations ({annotations.length})</h3>
-        <button type="button" className="modal-close" title="Close panel" onClick={onClose}>
-          <CloseIcon />
-        </button>
+        <div className="ann-panel-actions">
+          {annotations.length > 0 && (
+            confirmingClear ? (
+              <span className="ann-clear-confirm">
+                <span className="ann-clear-prompt">Clear all?</span>
+                <button
+                  type="button"
+                  className="ann-clear-yes"
+                  disabled={clearing}
+                  onClick={() => void handleClearAll()}
+                >
+                  {clearing ? "Clearing\u2026" : "Yes"}
+                </button>
+                <button
+                  type="button"
+                  className="ann-clear-no"
+                  disabled={clearing}
+                  onClick={() => setConfirmingClear(false)}
+                >
+                  No
+                </button>
+              </span>
+            ) : (
+              <button
+                type="button"
+                className="ann-clear-all"
+                title="Clear all annotations"
+                onClick={() => setConfirmingClear(true)}
+              >
+                <TrashIcon />
+                Clear all
+              </button>
+            )
+          )}
+          <button type="button" className="modal-close" title="Close panel" onClick={onClose}>
+            <CloseIcon />
+          </button>
+        </div>
       </div>
 
       {annotations.length === 0 ? (

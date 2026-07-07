@@ -5,6 +5,7 @@ import request from "supertest";
 import { createApp } from "../src/server.js";
 import {
   addAnnotation,
+  clearAnnotations,
   formatFeedbackForAgent,
   readAnnotations,
   removeAnnotation,
@@ -60,6 +61,16 @@ describe("annotation storage", () => {
     expect(after).toHaveLength(1);
     expect(after[0].id).toBe("a2");
   });
+
+  it("clears all annotations for a doc", async () => {
+    const docId = `test-clear-${Date.now()}`;
+    await addAnnotation(docId, makeAnnotation({ id: "a1", docId }));
+    await addAnnotation(docId, makeAnnotation({ id: "a2", docId, type: "highlight" }));
+    await addAnnotation(docId, makeAnnotation({ id: "a3", docId, type: "deletion" }));
+    expect(await readAnnotations(docId)).toHaveLength(3);
+    await clearAnnotations(docId);
+    expect(await readAnnotations(docId)).toEqual([]);
+  });
 });
 
 describe("formatFeedbackForAgent", () => {
@@ -113,6 +124,35 @@ describe("annotation server routes", () => {
 
     const getDeleted = await request(app).get(`/api/docs/${doc.id}/annotations`).expect(200);
     expect(getDeleted.body.annotations).toEqual([]);
+  });
+
+  it("clears all annotations via DELETE endpoint", async () => {
+    const root = await fixtureRoot();
+    const app = createApp({ roots: [root] });
+
+    const list = await request(app).get("/api/docs").expect(200);
+    const doc = list.body.docs[0];
+
+    await request(app)
+      .post(`/api/docs/${doc.id}/annotations`)
+      .send({ id: "c1", type: "comment", selectedText: "Plan", text: "one", startOffset: 0, endOffset: 4, createdAt: Date.now() })
+      .expect(200);
+    await request(app)
+      .post(`/api/docs/${doc.id}/annotations`)
+      .send({ id: "c2", type: "highlight", selectedText: "content", text: "", startOffset: 5, endOffset: 12, createdAt: Date.now() })
+      .expect(200);
+    expect((await request(app).get(`/api/docs/${doc.id}/annotations`)).body.annotations).toHaveLength(2);
+
+    await request(app).delete(`/api/docs/${doc.id}/annotations`).expect(200);
+
+    const cleared = await request(app).get(`/api/docs/${doc.id}/annotations`).expect(200);
+    expect(cleared.body.annotations).toEqual([]);
+  });
+
+  it("returns 404 when clearing annotations on unknown doc", async () => {
+    const root = await fixtureRoot();
+    const app = createApp({ roots: [root] });
+    await request(app).delete("/api/docs/nonexistent/annotations").expect(404);
   });
 
   it("returns 404 for annotations on unknown doc", async () => {

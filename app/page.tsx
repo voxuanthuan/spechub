@@ -434,6 +434,11 @@ export default function Home() {
     if (selectedAnnotationId === annotationId) setSelectedAnnotationId(null);
   }
 
+  function handleClearAnnotations() {
+    setAnnotations([]);
+    setSelectedAnnotationId(null);
+  }
+
   async function copySelectedPath() {
     if (!selectedDoc) return;
     await navigator.clipboard.writeText(selectedDoc.absolutePath);
@@ -1054,6 +1059,7 @@ export default function Home() {
                 selectedAnnotationId={selectedAnnotationId}
                 onSelectAnnotation={setSelectedAnnotationId}
                 onDeleteAnnotation={handleDeleteAnnotation}
+                onClearAnnotations={handleClearAnnotations}
                 onClose={() => setAnnotationPanelOpen(false)}
               />
             )}
@@ -1134,6 +1140,7 @@ export default function Home() {
                 selectedAnnotationId={selectedAnnotationId}
                 onSelectAnnotation={setSelectedAnnotationId}
                 onDeleteAnnotation={handleDeleteAnnotation}
+                onClearAnnotations={handleClearAnnotations}
                 onClose={() => setAnnotationPanelOpen(false)}
               />
             )}

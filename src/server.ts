@@ -3,7 +3,7 @@ import { access, readFile, stat } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { addAnnotation, formatFeedbackForAgent, readAnnotations, removeAnnotation, type AgentFeedback, type StoredAnnotation } from "./annotations.js";
+import { addAnnotation, clearAnnotations, formatFeedbackForAgent, readAnnotations, removeAnnotation, type AgentFeedback, type StoredAnnotation } from "./annotations.js";
 import express, { type Express, type Request, type Response } from "express";
 import {
   DEFAULT_CONFIG_PATH,
@@ -195,6 +195,16 @@ export function createApp(config: RuntimeSpecHubConfig = {}, index: DocumentInde
     };
     const saved = await addAnnotation(doc.id, annotation);
     response.json({ annotation: saved });
+  }));
+
+  app.delete("/api/docs/:id/annotations", asyncRoute(async (request, response) => {
+    const doc = await index.findById(request.params.id);
+    if (!doc) {
+      notFound(response);
+      return;
+    }
+    await clearAnnotations(doc.id);
+    response.json({ ok: true });
   }));
 
   app.delete("/api/docs/:id/annotations/:annotationId", asyncRoute(async (request, response) => {
