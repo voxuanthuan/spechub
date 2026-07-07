@@ -30,7 +30,8 @@ describe("resolveConfig", () => {
       "claude",
       "cursor",
       "augment",
-      "windsurf"
+      "windsurf",
+      "worktrees"
     ]);
     expect(config.sources[0].patterns).toEqual(expect.arrayContaining([
       "docs/**/*.md",

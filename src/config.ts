@@ -14,7 +14,7 @@ export const DEFAULT_IGNORE_PATTERNS = [
   ".trash"
 ];
 
-export const DEFAULT_DOC_PATTERNS = [
+const BASE_DOC_PATTERNS = [
   ".opencode/agents/**/*.{md,markdown,html}",
   "docs/**/*.{md,markdown,html}",
   "docs/superpowers/plans/**/*.{md,markdown,html}",
@@ -35,6 +35,15 @@ export const DEFAULT_DOC_PATTERNS = [
   "plan.md"
 ];
 
+// Agents that create git worktrees nested inside the repo. Docs in these worktrees
+// are matched relative to the repo root so they group under the original repository.
+const NESTED_WORKTREE_GLOBS = [".claude/worktrees/*"];
+
+export const DEFAULT_DOC_PATTERNS = [
+  ...BASE_DOC_PATTERNS,
+  ...NESTED_WORKTREE_GLOBS.flatMap((prefix) => BASE_DOC_PATTERNS.map((pattern) => `${prefix}/${pattern}`))
+];
+
 export const DEFAULT_CONFIG_PATH = "~/.config/spechub/config.json";
 
 const DEFAULT_AGENT_DOC_PATTERNS = [
@@ -48,6 +57,8 @@ const DEFAULT_AGENT_DOC_PATTERNS = [
 ];
 
 const DEFAULT_AGENT_SOURCE_NAMES = ["opencode", "codex", "claude", "cursor", "augment", "windsurf"];
+
+const DEFAULT_WORKTREE_ROOTS = ["~/.herdr/worktrees"];
 
 export { expandHome } from "./paths.js";
 
@@ -82,6 +93,13 @@ export function defaultConfig(): SpecHubConfig {
             ]
           : [])
       ]),
+      {
+        name: "worktrees",
+        mode: "worktrees" as const,
+        roots: DEFAULT_WORKTREE_ROOTS.map(expandHome),
+        patterns: [...DEFAULT_DOC_PATTERNS],
+        inferRepoFromContent: false
+      }
     ],
     titleOverrides: {}
   };
@@ -134,7 +152,10 @@ function normalizeSources(
       name: source.name,
       mode: source.mode,
       roots: source.roots.map(expandHome),
-      patterns: source.mode === "repositories" ? mergeDefaultDocPatterns(source.patterns) : [...source.patterns],
+      patterns:
+        source.mode === "repositories" || source.mode === "worktrees"
+          ? mergeDefaultDocPatterns(source.patterns)
+          : [...source.patterns],
       inferRepoFromContent: source.inferRepoFromContent,
       defaultCategory: source.defaultCategory
     }));

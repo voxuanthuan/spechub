@@ -1,6 +1,6 @@
 export type DocumentKind = "markdown" | "html";
 export type DocumentCategory = "plan" | "spec" | "superpowers" | "doc";
-export type SourceMode = "repositories" | "direct" | "opencode-db";
+export type SourceMode = "repositories" | "direct" | "opencode-db" | "worktrees";
 
 export type DocumentContentSource =
   | { type: "file" }

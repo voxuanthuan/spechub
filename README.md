@@ -67,6 +67,8 @@ SpecHub looks for common files such as:
 - `specs/**/*.{md,html}`
 - `Spec.md`, `spec.md`, `plan.md`
 - OpenCode plan sessions from `~/.local/share/opencode`
+- Git worktrees under `~/.herdr/worktrees/<repo>/<branch>` — every worktree's specs and plans are grouped under the original `<repo>`
+- Claude Code worktrees nested at `<repo>/.claude/worktrees/<value>/` — their specs and plans are grouped under the original `<repo>`
 
 ## Configure
 
