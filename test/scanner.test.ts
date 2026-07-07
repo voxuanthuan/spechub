@@ -587,6 +587,38 @@ describe("scanDocuments", () => {
     expect(docs).toHaveLength(1);
     expect(docs[0]).toMatchObject({ repoName: "core-app", relativePath: "docs/specs/real.md" });
   });
+
+  it("groups Claude worktree specs nested in .claude/worktrees under the repository", async () => {
+    const root = await fixtureRoot();
+    const repo = path.join(root, "core-app");
+    const mainSpec = path.join(repo, "docs", "specs");
+    const worktreeSpec = path.join(repo, ".claude", "worktrees", "worktree-login", "docs", "specs");
+    const worktreePlan = path.join(repo, ".claude", "worktrees", "worktree-login", "docs", "plans");
+    await mkdir(mainSpec, { recursive: true });
+    await mkdir(worktreeSpec, { recursive: true });
+    await mkdir(worktreePlan, { recursive: true });
+    await writeFile(path.join(repo, "package.json"), "{}");
+    await writeFile(path.join(mainSpec, "api.md"), "# Main API Spec\n");
+    await writeFile(path.join(worktreeSpec, "login.md"), "# Login Spec\n");
+    await writeFile(path.join(worktreePlan, "rollout.md"), "# Rollout Plan\n");
+
+    const docs = await scanDocuments({ roots: [root] });
+
+    expect(docs.map((doc) => doc.relativePath).sort()).toEqual([
+      ".claude/worktrees/worktree-login/docs/plans/rollout.md",
+      ".claude/worktrees/worktree-login/docs/specs/login.md",
+      "docs/specs/api.md"
+    ]);
+    expect(docs.every((doc) => doc.repoName === "core-app")).toBe(true);
+    expect(docs.find((doc) => doc.relativePath === ".claude/worktrees/worktree-login/docs/specs/login.md")).toMatchObject({
+      title: "Login Spec",
+      category: "spec"
+    });
+    expect(docs.find((doc) => doc.relativePath === ".claude/worktrees/worktree-login/docs/plans/rollout.md")).toMatchObject({
+      title: "Rollout Plan",
+      category: "plan"
+    });
+  });
 });
 
 async function writeOpenCodeDb(dbPath: string, repo: string): Promise<void> {
