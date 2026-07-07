@@ -3,7 +3,7 @@ import os from "node:os";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { defaultConfig } from "../src/config.js";
+import { DEFAULT_DOC_PATTERNS, defaultConfig } from "../src/config.js";
 import { scanDocuments } from "../src/scanner.js";
 
 async function fixtureRoot() {
@@ -291,8 +291,13 @@ describe("scanDocuments", () => {
       "claude",
       "cursor",
       "augment",
-      "windsurf"
+      "windsurf",
+      "worktrees"
     ]);
+    expect(sourceByName.get("worktrees")).toMatchObject({
+      mode: "worktrees",
+      roots: [path.join(os.homedir(), ".herdr", "worktrees")]
+    });
     expect(sourceByName.get("opencode")).toMatchObject({
       mode: "direct",
       roots: [
@@ -513,6 +518,74 @@ describe("scanDocuments", () => {
       "plans/in-scope.md",
       "plans/out-of-scope.md"
     ]);
+  });
+
+  it("groups worktree specs under the original repository", async () => {
+    const root = await fixtureRoot();
+    const worktrees = path.join(root, ".herdr", "worktrees");
+    const featureA = path.join(worktrees, "core-app", "feature-grap-19325", "docs", "specs");
+    const featureB = path.join(worktrees, "core-app", "bugfix-42", "docs", "plans");
+    const otherRepo = path.join(worktrees, "web-ui", "feature-login", "specs");
+    await mkdir(featureA, { recursive: true });
+    await mkdir(featureB, { recursive: true });
+    await mkdir(otherRepo, { recursive: true });
+    await writeFile(path.join(featureA, "sync.md"), "# Grapple Sync Spec\n");
+    await writeFile(path.join(featureB, "cleanup.md"), "# Cleanup Plan\n");
+    await writeFile(path.join(otherRepo, "login.html"), "<title>Login Flow</title>");
+
+    const docs = await scanDocuments({
+      sources: [
+        {
+          name: "worktrees",
+          mode: "worktrees",
+          roots: [worktrees],
+          patterns: [...DEFAULT_DOC_PATTERNS]
+        }
+      ]
+    });
+
+    expect(docs.map((doc) => doc.repoName).sort()).toEqual(["core-app", "core-app", "web-ui"]);
+    expect(docs.find((doc) => doc.relativePath === "docs/specs/sync.md")).toMatchObject({
+      repoName: "core-app",
+      sourceName: "worktrees",
+      title: "Grapple Sync Spec",
+      category: "spec"
+    });
+    expect(docs.find((doc) => doc.relativePath === "docs/plans/cleanup.md")).toMatchObject({
+      repoName: "core-app",
+      category: "plan"
+    });
+    expect(docs.find((doc) => doc.relativePath === "specs/login.html")).toMatchObject({
+      repoName: "web-ui",
+      kind: "html",
+      title: "Login Flow",
+      category: "spec"
+    });
+  });
+
+  it("ignores noisy folders when scanning worktrees", async () => {
+    const root = await fixtureRoot();
+    const worktrees = path.join(root, ".herdr", "worktrees");
+    const specs = path.join(worktrees, "core-app", "feature-x", "docs", "specs");
+    const nested = path.join(worktrees, "core-app", "feature-x", "node_modules", "pkg", "docs", "specs");
+    await mkdir(specs, { recursive: true });
+    await mkdir(nested, { recursive: true });
+    await writeFile(path.join(specs, "real.md"), "# Real Spec\n");
+    await writeFile(path.join(nested, "noise.md"), "# Noise\n");
+
+    const docs = await scanDocuments({
+      sources: [
+        {
+          name: "worktrees",
+          mode: "worktrees",
+          roots: [worktrees],
+          patterns: [...DEFAULT_DOC_PATTERNS]
+        }
+      ]
+    });
+
+    expect(docs).toHaveLength(1);
+    expect(docs[0]).toMatchObject({ repoName: "core-app", relativePath: "docs/specs/real.md" });
   });
 });
 

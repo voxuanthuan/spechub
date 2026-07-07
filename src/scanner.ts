@@ -77,6 +77,13 @@ async function scanSource(
     return docs.flat();
   }
 
+  if (source.mode === "worktrees") {
+    const docs = await Promise.all(
+      source.roots.map((root) => scanWorktreesRoot(root, source, ignorePatterns, titleOverrides))
+    );
+    return docs.flat();
+  }
+
   const repoRoots = await discoverRepositoryRoots(source.roots, ignorePatterns);
   const docs = await Promise.all(
     repoRoots.map((repoRoot) => scanRepository(repoRoot, source.patterns, ignorePatterns, titleOverrides, source.name, [], source.defaultCategory))
@@ -103,6 +110,54 @@ async function scanDirectRoot(
     source.defaultCategory,
     source.name
   );
+}
+
+async function scanWorktreesRoot(
+  root: string,
+  source: SpecHubSource,
+  ignorePatterns: string[],
+  titleOverrides: Record<string, string>
+): Promise<DocumentMeta[]> {
+  const worktreesRoot = path.resolve(root);
+  const repoGroups = await listSubdirectories(worktreesRoot, ignorePatterns);
+
+  const docs = await Promise.all(
+    repoGroups.map(async (repoGroup) => {
+      const groupPath = path.join(worktreesRoot, repoGroup);
+      const worktrees = await listSubdirectories(groupPath, ignorePatterns);
+
+      const scanned = await Promise.all(
+        worktrees.map((worktree) =>
+          scanRepository(
+            path.join(groupPath, worktree),
+            source.patterns,
+            ignorePatterns,
+            titleOverrides,
+            source.name,
+            [],
+            source.defaultCategory,
+            repoGroup
+          )
+        )
+      );
+      return scanned.flat();
+    })
+  );
+
+  return docs.flat();
+}
+
+async function listSubdirectories(directory: string, ignorePatterns: string[]): Promise<string[]> {
+  let entries;
+  try {
+    entries = await readdir(directory, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+  return entries
+    .filter((entry) => entry.isDirectory() && !isIgnored(entry.name, ignorePatterns))
+    .map((entry) => entry.name)
+    .sort();
 }
 
 async function createRepoHints(roots: string[], ignorePatterns: string[]): Promise<RepoHint[]> {

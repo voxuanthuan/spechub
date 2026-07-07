@@ -49,6 +49,8 @@ const DEFAULT_AGENT_DOC_PATTERNS = [
 
 const DEFAULT_AGENT_SOURCE_NAMES = ["opencode", "codex", "claude", "cursor", "augment", "windsurf"];
 
+const DEFAULT_WORKTREE_ROOTS = ["~/.herdr/worktrees"];
+
 export { expandHome } from "./paths.js";
 
 export function defaultConfig(): SpecHubConfig {
@@ -82,6 +84,13 @@ export function defaultConfig(): SpecHubConfig {
             ]
           : [])
       ]),
+      {
+        name: "worktrees",
+        mode: "worktrees" as const,
+        roots: DEFAULT_WORKTREE_ROOTS.map(expandHome),
+        patterns: [...DEFAULT_DOC_PATTERNS],
+        inferRepoFromContent: false
+      }
     ],
     titleOverrides: {}
   };
@@ -134,7 +143,10 @@ function normalizeSources(
       name: source.name,
       mode: source.mode,
       roots: source.roots.map(expandHome),
-      patterns: source.mode === "repositories" ? mergeDefaultDocPatterns(source.patterns) : [...source.patterns],
+      patterns:
+        source.mode === "repositories" || source.mode === "worktrees"
+          ? mergeDefaultDocPatterns(source.patterns)
+          : [...source.patterns],
       inferRepoFromContent: source.inferRepoFromContent,
       defaultCategory: source.defaultCategory
     }));
