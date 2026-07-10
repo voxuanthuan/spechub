@@ -15,7 +15,7 @@ describe("desktop integration", () => {
         frontendDist?: string;
       };
       bundle?: {
-        targets?: string[];
+        targets?: string | string[];
         icon?: string[];
       };
     };
@@ -29,8 +29,19 @@ describe("desktop integration", () => {
       frontendDist: "../out"
     });
     expect(tauriConfig.identifier).not.toMatch(/\.app$/);
-    expect(tauriConfig.bundle?.targets).toEqual(["deb", "rpm"]);
+    // "all" lets Tauri build only the bundle types native to each host runner
+    // (Linux deb/rpm/AppImage, macOS app/dmg, Windows msi/nsis).
+    expect(tauriConfig.bundle?.targets).toBe("all");
     expect(tauriConfig.bundle?.icon).toContain("icons/icon.png");
+  });
+
+  it("grants the desktop window core capabilities for live event updates", async () => {
+    const capabilities = JSON.parse(
+      await readFile(path.join(root, "src-tauri", "capabilities", "default.json"), "utf8")
+    ) as { windows?: string[]; permissions?: string[] };
+
+    expect(capabilities.windows).toContain("main");
+    expect(capabilities.permissions).toContain("core:default");
   });
 
   it("exposes package scripts for web fallback and desktop builds", async () => {
@@ -64,6 +75,30 @@ describe("desktop integration", () => {
     expect(main).toContain("title_overrides");
     expect(main).toContain("sources");
     expect(main).toContain("generate_handler!");
+  });
+
+  it("registers desktop commands for state, annotations, and live updates", async () => {
+    const main = await readFile(path.join(root, "src-tauri", "src", "main.rs"), "utf8");
+    const state = await readFile(path.join(root, "src-tauri", "src", "state.rs"), "utf8");
+    const annotations = await readFile(path.join(root, "src-tauri", "src", "annotations.rs"), "utf8");
+    const watcher = await readFile(path.join(root, "src-tauri", "src", "watcher.rs"), "utf8");
+
+    for (const command of [
+      "state::get_state",
+      "state::patch_state",
+      "annotations::list_annotations",
+      "annotations::add_annotation",
+      "annotations::remove_annotation",
+      "annotations::clear_annotations",
+      "annotations::format_agent_feedback"
+    ]) {
+      expect(main).toContain(command);
+    }
+    expect(main).toContain("watcher::start");
+    expect(state).toContain("fn get_state");
+    expect(state).toContain("fn patch_state");
+    expect(annotations).toContain("fn format_agent_feedback");
+    expect(watcher).toContain("docs-changed");
   });
 
   it("uses cached scan results for desktop document actions", async () => {

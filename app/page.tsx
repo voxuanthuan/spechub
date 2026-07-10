@@ -11,7 +11,7 @@ import {
   PlusCircleIcon, PlusIcon, RefreshIcon, SearchIcon, SettingsIcon,
   StarIcon, TrashIcon
 } from "./components/icons/index.js";
-import { deleteAnnotation as apiDeleteAnnotation, fetchAnnotations, fetchDocs, fetchDocument, fetchState, isDesktop, patchState, saveAnnotation } from "./lib/api.js";
+import { deleteAnnotation as apiDeleteAnnotation, fetchAnnotations, fetchDocs, fetchDocument, fetchState, isDesktop, patchState, saveAnnotation, subscribeDocsChanged } from "./lib/api.js";
 import { filterDocs, normalizeRepoNames, summarizeRepos } from "./lib/filters.js";
 import { formatDate, formatLiveTime } from "./lib/format.js";
 import { sanitizeMarkdown } from "./lib/sanitize.js";
@@ -134,16 +134,13 @@ export default function Home() {
     setDensity(readStoredDensity());
     setIsTauri(isDesktop());
     void loadDocs();
-    if (!isDesktop()) void loadState();
+    void loadState();
   }, []);
 
   useEffect(() => {
-    if (isDesktop() || typeof EventSource === "undefined") return;
-    const source = new EventSource("/api/events");
-    source.addEventListener("docs-changed", () => {
+    return subscribeDocsChanged(() => {
       void loadDocs({ quiet: true });
     });
-    return () => source.close();
   }, []);
 
   useEffect(() => {
@@ -553,15 +550,13 @@ export default function Home() {
     const nextState = normalizeClientState({ ...appState, ...patch });
     setAppState(nextState);
     if (patch.hiddenRepos) setHiddenRepos(nextState.hiddenRepos);
-    if (!isDesktop()) {
-      void patchState(patch)
-        .then((saved) => {
-          setAppState(saved);
-          setHiddenRepos(saved.hiddenRepos);
-          showToast("Saved");
-        })
-        .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to save dashboard state."));
-    }
+    void patchState(patch)
+      .then((saved) => {
+        setAppState(saved);
+        setHiddenRepos(saved.hiddenRepos);
+        showToast("Saved");
+      })
+      .catch((reason) => setError(reason instanceof Error ? reason.message : "Unable to save dashboard state."));
   }
 
   function clearDocFilters() {
