@@ -106,6 +106,41 @@ pnpm test
 pnpm build
 ```
 
+## Desktop App
+
+SpecHub ships a native desktop app (Tauri) for macOS, Linux, and Windows. It shares the same
+dashboard UI as the web version and the same config, state, and annotation files under
+`~/.config/spechub/`, so you can switch between them freely.
+
+Run it in development:
+
+```sh
+pnpm dev:desktop
+```
+
+Build installers for the current OS (Linux → `.deb`/`.rpm`/AppImage, macOS → `.app`/`.dmg`,
+Windows → `.msi`/`.nsis`):
+
+```sh
+pnpm build:desktop
+```
+
+Bundles land in `src-tauri/target/release/bundle/`. Tagged releases (`v*`) build all platforms in
+CI and attach the installers to a draft GitHub release.
+
+**Prerequisites**
+
+- **Linux:** WebKitGTK 4.1 and GTK dev libraries — on Debian/Ubuntu:
+  `sudo apt-get install libwebkit2gtk-4.1-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev patchelf file libxdo-dev libssl-dev`.
+- **macOS / Windows:** no extra system packages. The Windows installer bootstraps the WebView2
+  runtime automatically.
+
+**Unsigned builds**
+
+The published installers are not code-signed yet. On macOS, right-click the app and choose **Open**
+on first launch (or run `xattr -cr /Applications/SpecHub.app`). On Windows, if SmartScreen warns,
+choose **More info → Run anyway**.
+
 ## Local First
 
 SpecHub serves a dashboard from your own machine and reads files already on your disk. It is built for developers using Codex, Claude Code, OpenCode, and other AI agents that generate lots of planning artifacts across many repositories.

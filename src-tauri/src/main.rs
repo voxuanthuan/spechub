@@ -5,7 +5,6 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     collections::{BTreeMap, BTreeSet},
-    env,
     fs,
     path::{Path, PathBuf},
     sync::Mutex,
@@ -13,7 +12,13 @@ use std::{
 };
 use walkdir::WalkDir;
 
+mod annotations;
 mod opencode;
+mod paths;
+mod state;
+mod watcher;
+
+use paths::{expand_home, resolve_like_node, spechub_config_dir, write_json_atomic};
 
 const DEFAULT_IGNORE_PATTERNS: &[&str] = &[
     ".git",
@@ -157,17 +162,20 @@ struct PartialConfig {
 }
 
 #[derive(Debug, Clone)]
-struct SpecHubConfig {
-    roots: Vec<PathBuf>,
-    ignore_patterns: Vec<String>,
+pub(crate) struct SpecHubConfig {
+    pub roots: Vec<PathBuf>,
+    pub ignore_patterns: Vec<String>,
     doc_patterns: Vec<String>,
-    sources: Vec<SourceConfig>,
+    pub sources: Vec<SourceConfig>,
     title_overrides: BTreeMap<String, String>,
 }
 
 #[derive(Default)]
-struct AppState {
-    cached_docs: Mutex<Vec<DocumentMeta>>,
+pub(crate) struct AppState {
+    pub(crate) cached_docs: Mutex<Vec<DocumentMeta>>,
+    /// Serializes read-modify-write of the shared state file across concurrent
+    /// `patch_state` calls (the Node server is effectively single-threaded here).
+    pub(crate) state_lock: Mutex<()>,
 }
 
 #[tauri::command]
@@ -300,7 +308,7 @@ fn find_document(state: &tauri::State<'_, AppState>, id: &str) -> Result<Documen
         .ok_or_else(|| "Document not found".to_string())
 }
 
-fn scan_documents_inner(config: &SpecHubConfig) -> Result<Vec<DocumentMeta>, String> {
+pub(crate) fn scan_documents_inner(config: &SpecHubConfig) -> Result<Vec<DocumentMeta>, String> {
     let mut docs = Vec::new();
     let repo_hints = create_repo_hints(&config.roots, &config.ignore_patterns);
 
@@ -374,7 +382,7 @@ fn create_repo_hints(roots: &[PathBuf], ignore_patterns: &[String]) -> Vec<RepoH
         .collect()
 }
 
-fn resolve_config() -> Result<SpecHubConfig, String> {
+pub(crate) fn resolve_config() -> Result<SpecHubConfig, String> {
     let base = default_config();
     let file_config = read_config_file();
     let has_scan_overrides = file_config.roots.is_some() || file_config.doc_patterns.is_some() || file_config.sources.is_some();
@@ -726,7 +734,11 @@ fn summarize_repos(docs: &[DocumentMeta]) -> Vec<RepoSummary> {
 }
 
 fn document_id(path: &Path) -> String {
-    let resolved = path.canonicalize().unwrap_or_else(|_| path.to_path_buf());
+    // Mirror the TS `documentId` (src/scanner.ts): hash `path.resolve(...)`
+    // (lexical, no symlink resolution) so web and desktop derive the same id for
+    // the same file. Using `canonicalize()` here diverges under symlinked roots
+    // and always on Windows (the `\\?\` prefix), breaking shared annotations.
+    let resolved = resolve_like_node(&path.to_string_lossy());
     let mut hasher = Sha256::new();
     hasher.update(resolved.to_string_lossy().as_bytes());
     hex::encode(hasher.finalize()).chars().take(20).collect()
@@ -755,15 +767,10 @@ fn normalize_path(path: &Path) -> String {
 }
 
 pub(crate) fn normalize_override_path(input: &str) -> String {
-    let path = expand_home(input);
-    let absolute = if path.is_absolute() {
-        path
-    } else {
-        env::current_dir()
-            .map(|current| current.join(path))
-            .unwrap_or_else(|_| PathBuf::from(input))
-    };
-    normalize_path(&absolute)
+    // Match the TS `normalizeOverridePath` (src/config.ts): `path.resolve` with
+    // native separators. The `/`-forcing `normalize_path` is kept only for glob
+    // matching, not for persisted keys.
+    resolve_like_node(input).to_string_lossy().to_string()
 }
 
 fn normalize_title_overrides(overrides: BTreeMap<String, String>) -> BTreeMap<String, String> {
@@ -780,20 +787,8 @@ fn normalize_title_overrides(overrides: BTreeMap<String, String>) -> BTreeMap<St
         .collect()
 }
 
-fn expand_home(input: &str) -> PathBuf {
-    if input == "~" {
-        return dirs::home_dir().unwrap_or_else(|| PathBuf::from(input));
-    }
-    if let Some(rest) = input.strip_prefix("~/") {
-        return dirs::home_dir()
-            .map(|home| home.join(rest))
-            .unwrap_or_else(|| PathBuf::from(input));
-    }
-    PathBuf::from(input)
-}
-
-fn config_path() -> PathBuf {
-    expand_home("~/.config/spechub/config.json")
+pub(crate) fn config_path() -> PathBuf {
+    spechub_config_dir().join("config.json")
 }
 
 fn write_title_override(absolute_path: &str, title: &str) -> Result<(), String> {
@@ -822,10 +817,6 @@ fn write_title_override(absolute_path: &str, title: &str) -> Result<(), String> 
         title_overrides.insert(key, trimmed.to_string());
     }
 
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-
     if let Some(object) = value.as_object_mut() {
         object.insert(
             "titleOverrides".to_string(),
@@ -833,10 +824,7 @@ fn write_title_override(absolute_path: &str, title: &str) -> Result<(), String> 
         );
     }
 
-    let temp_path = path.with_extension("json.tmp");
-    let raw = serde_json::to_string_pretty(&value).map_err(|error| error.to_string())?;
-    fs::write(&temp_path, format!("{raw}\n")).map_err(|error| error.to_string())?;
-    fs::rename(temp_path, path).map_err(|error| error.to_string())
+    write_json_atomic(&path, &value, true)
 }
 
 fn open_path(path: &str) -> Result<(), String> {
@@ -846,13 +834,24 @@ fn open_path(path: &str) -> Result<(), String> {
 pub fn run() {
     tauri::Builder::default()
         .manage(AppState::default())
+        .setup(|app| {
+            watcher::start(app.handle().clone());
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             scan_documents,
             get_document,
             read_raw_document,
             open_document_source,
             open_document_folder,
-            update_document_title
+            update_document_title,
+            state::get_state,
+            state::patch_state,
+            annotations::list_annotations,
+            annotations::add_annotation,
+            annotations::remove_annotation,
+            annotations::clear_annotations,
+            annotations::format_agent_feedback
         ])
         .run(tauri::generate_context!())
         .expect("error while running SpecHub");
