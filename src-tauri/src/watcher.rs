@@ -79,22 +79,10 @@ fn run(app: AppHandle) -> Result<(), String> {
                 continue;
             }
         };
-        match scan_documents_inner(&next_config) {
-            Ok(docs) => {
-                if let Some(state) = app.try_state::<AppState>() {
-                    if let Ok(mut cached) = state.cached_docs.lock() {
-                        *cached = docs;
-                    }
-                }
-                version = version.wrapping_add(1);
-                let _ = app.emit("docs-changed", serde_json::json!({ "version": version }));
-            }
-            Err(error) => {
-                eprintln!("SpecHub rescan failed: {error}");
-                continue;
-            }
-        }
 
+        // Adopt the freshly resolved config and its watch set immediately, before
+        // scanning. A transient scan failure must not leave us watching the old
+        // directories or filtering events with stale ignore rules.
         if config_changed {
             let next_paths = watch_paths(&next_config, &config_file);
             if next_paths != watched {
@@ -106,6 +94,21 @@ fn run(app: AppHandle) -> Result<(), String> {
             }
         }
         config = next_config;
+
+        match scan_documents_inner(&config) {
+            Ok(docs) => {
+                if let Some(state) = app.try_state::<AppState>() {
+                    if let Ok(mut cached) = state.cached_docs.lock() {
+                        *cached = docs;
+                    }
+                }
+                version = version.wrapping_add(1);
+                let _ = app.emit("docs-changed", serde_json::json!({ "version": version }));
+            }
+            Err(error) => {
+                eprintln!("SpecHub rescan failed: {error}");
+            }
+        }
     }
 }
 
