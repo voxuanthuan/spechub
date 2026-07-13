@@ -3,7 +3,7 @@
 **A local dashboard for the specs, plans, and HTML reports your AI agents leave across your machine.**
 *Inspired by [The Unreasonable Effectiveness of HTML](https://thariqs.github.io/html-effectiveness/).*
 
-SpecHub scans your workspaces, groups agent output by repository, renders Markdown safely, previews HTML artifacts, and lets you jump back to the original file. No upload. No hosted account. Just a fast local index for agent-driven work.
+SpecHub scans your workspaces, groups agent output by repository, renders Markdown safely, previews HTML artifacts, and lets you jump back to the original file. Documents stay local unless you explicitly publish a read-only snapshot.
 
 ![SpecHub dashboard](.github/assets/spechub-dashboard.png)
 
@@ -19,7 +19,7 @@ SpecHub is built on the same premise. It indexes both `.md` and `.html` artifact
 - Read Markdown and sandboxed HTML reports in one browser UI.
 - Filter by repo, type, path, date, and text when your agent output gets noisy.
 - Renders HTML reports your agents ship — not just Markdown — because HTML is the most effective artifact an agent can produce.
-- Keep everything local on disk.
+- Keep everything local on disk until you choose to share a snapshot.
 
 ## Install
 
@@ -83,11 +83,49 @@ Minimal example:
 ```json
 {
   "roots": ["~/workspace"],
+  "shareServerUrl": "https://share.example.com",
   "ignorePatterns": [".git", "node_modules", "dist", "build", ".next"],
   "titleOverrides": {
     "~/workspace/my-repo/docs/specs/api.md": "API Redesign Spec"
   }
 }
+```
+
+## Public Sharing
+
+SpecHub can publish an individual spec or plan to a separately hosted, read-only viewer:
+
+1. Run the share service or deploy it to a host with persistent storage.
+2. Set **Workspace → Public sharing** to its public URL, or add `shareServerUrl` to the config.
+3. Select a document, choose **Share**, review it for secrets, and publish the snapshot.
+4. Copy the opaque public link. Updating republishes the current file; unsharing deletes it.
+
+Anyone with the link can read the snapshot. Links are unlisted and marked `noindex,nofollow`, but
+they are not access-controlled. Local paths are never included. The private update/delete secret is
+stored only under `~/.config/spechub/shares/`.
+
+Run the hosted service locally:
+
+```sh
+pnpm build:server
+SPECHUB_SHARE_PUBLIC_URL=http://127.0.0.1:8787 pnpm dev:share -- --host 0.0.0.0
+```
+
+Service configuration:
+
+- `SPECHUB_SHARE_DATA_DIR` — persistent snapshot directory (default
+  `~/.local/share/spechub-share`).
+- `SPECHUB_SHARE_PUBLIC_URL` — canonical public origin used in generated links.
+- `SPECHUB_SHARE_TRUST_PROXY` — proxy hop count (usually `1`) when deployed behind a trusted
+  reverse proxy; leave unset for direct exposure.
+- `SPECHUB_SHARE_SERVER_URL` — optional local SpecHub override for `shareServerUrl`.
+
+Container example:
+
+```sh
+docker build -f Dockerfile.share -t spechub-share .
+docker run --rm -p 8787:8787 -v spechub-share-data:/data \
+  -e SPECHUB_SHARE_PUBLIC_URL=https://share.example.com spechub-share
 ```
 
 ## Develop
@@ -143,4 +181,6 @@ choose **More info → Run anyway**.
 
 ## Local First
 
-SpecHub serves a dashboard from your own machine and reads files already on your disk. It is built for developers using Codex, Claude Code, OpenCode, and other AI agents that generate lots of planning artifacts across many repositories.
+SpecHub serves a dashboard from your own machine and reads files already on your disk. Public
+sharing is explicit, document-by-document, and publishes a sanitized snapshot rather than granting
+remote access to your workspace.

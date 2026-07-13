@@ -212,8 +212,21 @@ export async function loadConfig(configPath = DEFAULT_CONFIG_PATH): Promise<Part
     ignorePatterns: parsed.ignorePatterns,
     docPatterns: parsed.docPatterns,
     sources: parsed.sources,
-    titleOverrides: parsed.titleOverrides
+    titleOverrides: parsed.titleOverrides,
+    shareServerUrl: normalizeShareServerUrl(process.env.SPECHUB_SHARE_SERVER_URL ?? parsed.shareServerUrl)
   };
+}
+
+export function normalizeShareServerUrl(value: unknown): string | undefined {
+  if (typeof value !== "string" || !value.trim()) return undefined;
+  const url = new URL(value.trim());
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error("Share server URL must use http or https.");
+  }
+  if (url.username || url.password) {
+    throw new Error("Share server URL must not include credentials.");
+  }
+  return url.toString().replace(/\/$/, "");
 }
 
 export function normalizeRoots(roots: readonly string[]): string[] {
@@ -284,6 +297,20 @@ export async function updateRoots(configPath: string, roots: readonly string[]):
   return normalized;
 }
 
+export async function updateShareServerUrl(configPath: string, shareServerUrl: string): Promise<string | undefined> {
+  const normalized = normalizeShareServerUrl(shareServerUrl);
+  await mutateConfigFile(configPath, (existing) => {
+    const next = { ...existing };
+    if (normalized) {
+      next.shareServerUrl = normalized;
+    } else {
+      delete next.shareServerUrl;
+    }
+    return next;
+  });
+  return normalized;
+}
+
 export async function resolveConfig(options: {
   configPath?: string;
   roots?: string[];
@@ -308,6 +335,7 @@ export async function resolveConfig(options: {
       base
     ),
     titleOverrides: normalizeTitleOverrides(fileConfig.titleOverrides),
+    shareServerUrl: normalizeShareServerUrl(process.env.SPECHUB_SHARE_SERVER_URL ?? fileConfig.shareServerUrl),
     restrictAgentStorageToRoots
   };
 }

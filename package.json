@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "bin": {
-    "spechub": "./dist/src/cli.js"
+    "spechub": "./dist/src/cli.js",
+    "spechub-share": "./dist/src/share-service-cli.js"
   },
   "scripts": {
     "build": "pnpm build:web && pnpm build:server",
@@ -14,6 +15,7 @@
     "dev": "pnpm dev:desktop",
     "dev:browser": "pnpm build:web && tsx src/cli.ts --open",
     "dev:desktop": "tauri dev",
+    "dev:share": "tsx src/share-service-cli.ts",
     "dev:web": "next dev",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"

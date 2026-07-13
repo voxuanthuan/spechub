@@ -15,7 +15,9 @@ use walkdir::WalkDir;
 mod annotations;
 mod opencode;
 mod paths;
+mod sharing;
 mod state;
+mod settings;
 mod watcher;
 
 use paths::{expand_home, resolve_like_node, spechub_config_dir, write_json_atomic};
@@ -159,6 +161,7 @@ struct PartialConfig {
     doc_patterns: Option<Vec<String>>,
     sources: Option<Vec<PartialSourceConfig>>,
     title_overrides: Option<BTreeMap<String, String>>,
+    share_server_url: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -168,6 +171,7 @@ pub(crate) struct SpecHubConfig {
     doc_patterns: Vec<String>,
     pub sources: Vec<SourceConfig>,
     title_overrides: BTreeMap<String, String>,
+    pub share_server_url: Option<String>,
 }
 
 #[derive(Default)]
@@ -250,7 +254,7 @@ fn update_document_title(id: String, title: String, state: tauri::State<'_, AppS
     })
 }
 
-fn read_document_content(doc: &DocumentMeta) -> Result<String, String> {
+pub(crate) fn read_document_content(doc: &DocumentMeta) -> Result<String, String> {
     if let Some(DocumentContentSource::OpencodeDb { db_path, session_id }) = &doc.content_source {
         return opencode::read_opencode_plan_content(db_path, session_id);
     }
@@ -296,7 +300,7 @@ fn find_cached_document(state: &tauri::State<'_, AppState>, id: &str) -> Result<
         .cloned())
 }
 
-fn find_document(state: &tauri::State<'_, AppState>, id: &str) -> Result<DocumentMeta, String> {
+pub(crate) fn find_document(state: &tauri::State<'_, AppState>, id: &str) -> Result<DocumentMeta, String> {
     if let Some(doc) = find_cached_document(state, id)? {
         return Ok(doc);
     }
@@ -406,6 +410,10 @@ pub(crate) fn resolve_config() -> Result<SpecHubConfig, String> {
         doc_patterns,
         sources,
         title_overrides: normalize_title_overrides(file_config.title_overrides.unwrap_or_default()),
+        share_server_url: std::env::var("SPECHUB_SHARE_SERVER_URL")
+            .ok()
+            .or(file_config.share_server_url)
+            .and_then(normalize_share_server_url),
     })
 }
 
@@ -443,6 +451,7 @@ fn default_config() -> SpecHubConfig {
         ignore_patterns: DEFAULT_IGNORE_PATTERNS.iter().map(|item| item.to_string()).collect(),
         doc_patterns,
         title_overrides: BTreeMap::new(),
+        share_server_url: None,
     }
 }
 
@@ -456,7 +465,17 @@ fn read_config_file() -> PartialConfig {
             doc_patterns: None,
             sources: None,
             title_overrides: None,
+            share_server_url: None,
         })
+}
+
+fn normalize_share_server_url(value: String) -> Option<String> {
+    let trimmed = value.trim().trim_end_matches('/').to_string();
+    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+        Some(trimmed)
+    } else {
+        None
+    }
 }
 
 fn normalize_sources(
@@ -851,7 +870,12 @@ pub fn run() {
             annotations::add_annotation,
             annotations::remove_annotation,
             annotations::clear_annotations,
-            annotations::format_agent_feedback
+            annotations::format_agent_feedback,
+            sharing::get_document_share,
+            sharing::share_document,
+            sharing::unshare_document,
+            settings::get_config_info,
+            settings::update_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SpecHub");

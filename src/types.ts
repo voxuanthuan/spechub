@@ -21,6 +21,7 @@ export interface SpecHubConfig {
   docPatterns: string[];
   sources: SpecHubSource[];
   titleOverrides: Record<string, string>;
+  shareServerUrl?: string;
   /**
    * When true, docs from agent storage outside the configured roots are filtered
    * to those belonging to a repo under `roots`. Runtime-only; not persisted to config.json.
@@ -34,6 +35,7 @@ export type RuntimeSpecHubConfig = Partial<SpecHubConfig> & {
   configPath?: string;
   explicitRoots?: boolean;
   statePath?: string;
+  shareStateDir?: string;
 };
 
 export interface DocumentMeta {
@@ -56,4 +58,30 @@ export interface DocumentMeta {
 export interface DocumentDetail extends DocumentMeta {
   rawUrl: string;
   renderedHtml?: string;
+}
+
+export interface SharedDocument {
+  schemaVersion: 1;
+  title: string;
+  kind: DocumentKind;
+  category: DocumentCategory;
+  repoName: string;
+  relativePath: string;
+  modifiedAt: string;
+  content: string;
+  publishedAt: string;
+}
+
+export interface DocumentShare {
+  id: string;
+  url: string;
+  secret: string;
+  serverUrl?: string;
+  updatedAt: string;
+}
+
+export interface PublicDocumentShare {
+  id: string;
+  url: string;
+  updatedAt: string;
 }

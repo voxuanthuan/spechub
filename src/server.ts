@@ -12,6 +12,7 @@ import {
   readConfigFile,
   resolveConfig,
   updateRoots,
+  updateShareServerUrl,
   updateTitleOverride
 } from "./config.js";
 import { renderMarkdown } from "./markdown.js";
@@ -19,6 +20,14 @@ import { readOpenCodePlanContent } from "./opencode.js";
 import { openLocalPath } from "./opener.js";
 import { createDocumentIndex, type DocumentIndex } from "./index-service.js";
 import { DEFAULT_STATE_PATH, parseStatePatch, readStateFile, updateStateFile } from "./state.js";
+import {
+  createSharedDocument,
+  DEFAULT_SHARE_STATE_DIR,
+  publicShare,
+  publishDocumentShare,
+  readDocumentShare,
+  removeDocumentShare
+} from "./sharing.js";
 import type { DocumentMeta, RuntimeSpecHubConfig, SpecHubConfig } from "./types.js";
 
 const moduleDir = path.dirname(fileURLToPath(import.meta.url));
@@ -160,6 +169,78 @@ export function createApp(config: RuntimeSpecHubConfig = {}, index: DocumentInde
     }
     await index.refresh();
     response.json(await describeConfig(config));
+  }));
+
+  app.patch("/api/config/share-server", asyncRoute(async (request, response) => {
+    const candidate = request.body?.shareServerUrl;
+    if (typeof candidate !== "string") {
+      response.status(400).json({ error: "shareServerUrl must be a string." });
+      return;
+    }
+    try {
+      await updateShareServerUrl(config.configPath ?? DEFAULT_CONFIG_PATH, candidate);
+    } catch (error) {
+      response.status(400).json({ error: error instanceof Error ? error.message : "Invalid share server URL." });
+      return;
+    }
+    response.json(await describeConfig(config));
+  }));
+
+  app.get("/api/docs/:id/share", asyncRoute(async (request, response) => {
+    const doc = await index.findById(request.params.id);
+    if (!doc) {
+      notFound(response);
+      return;
+    }
+    const share = await readDocumentShare(doc.id, config.shareStateDir ?? DEFAULT_SHARE_STATE_DIR);
+    response.json({ share: share ? publicShare(share) : null });
+  }));
+
+  app.post("/api/docs/:id/share", asyncRoute(async (request, response) => {
+    const doc = await index.findById(request.params.id);
+    if (!doc) {
+      notFound(response);
+      return;
+    }
+    const stateDir = config.shareStateDir ?? DEFAULT_SHARE_STATE_DIR;
+    const existing = await readDocumentShare(doc.id, stateDir);
+    const shareServerUrl = existing?.serverUrl ?? await resolveShareServerUrl(config);
+    if (!shareServerUrl) {
+      response.status(503).json({ error: "Configure a share server URL in Workspace settings before publishing." });
+      return;
+    }
+    const share = await publishDocumentShare({
+      docId: doc.id,
+      shareServerUrl,
+      document: createSharedDocument(doc, await readDocumentContent(doc)),
+      stateDir
+    });
+    response.json({ share });
+  }));
+
+  app.delete("/api/docs/:id/share", asyncRoute(async (request, response) => {
+    const doc = await index.findById(request.params.id);
+    if (!doc) {
+      notFound(response);
+      return;
+    }
+    const stateDir = config.shareStateDir ?? DEFAULT_SHARE_STATE_DIR;
+    const existing = await readDocumentShare(doc.id, stateDir);
+    if (!existing) {
+      response.status(204).end();
+      return;
+    }
+    const shareServerUrl = existing.serverUrl ?? await resolveShareServerUrl(config);
+    if (!shareServerUrl) {
+      response.status(503).json({ error: "Configure the original share server URL before unsharing." });
+      return;
+    }
+    await removeDocumentShare({
+      docId: doc.id,
+      shareServerUrl,
+      stateDir
+    });
+    response.status(204).end();
   }));
 
   app.get("/api/docs/:id/annotations", asyncRoute(async (request, response) => {
@@ -316,6 +397,7 @@ async function describeConfig(config: RuntimeSpecHubConfig): Promise<{
   configPath: string;
   roots: Array<{ path: string; expandedPath: string; exists: boolean }>;
   explicitRoots: boolean;
+  shareServerUrl: string;
   warnings: string[];
 }> {
   const configPath = config.configPath ?? DEFAULT_CONFIG_PATH;
@@ -341,7 +423,18 @@ async function describeConfig(config: RuntimeSpecHubConfig): Promise<{
   if (explicitRoots) {
     warnings.push("Server was started with --roots; saved roots take effect on next launch.");
   }
-  return { configPath, roots, explicitRoots, warnings };
+  const resolved = await currentConfig(config);
+  return {
+    configPath,
+    roots,
+    explicitRoots,
+    shareServerUrl: resolved.shareServerUrl ?? "",
+    warnings
+  };
+}
+
+async function resolveShareServerUrl(config: RuntimeSpecHubConfig): Promise<string | undefined> {
+  return (await currentConfig(config)).shareServerUrl;
 }
 
 async function readDocumentContent(doc: DocumentMeta): Promise<string> {
