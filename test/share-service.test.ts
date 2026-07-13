@@ -89,6 +89,23 @@ describe("hosted share service", () => {
       .expect(413);
   });
 
+  it("supports a distributed creation limiter", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "spechub-share-limiter-"));
+    const app = createShareService({
+      dataDir,
+      createLimiter: {
+        async allow() {
+          return false;
+        }
+      }
+    });
+
+    await request(app)
+      .post("/api/shares")
+      .send({ document: sharedDocument() })
+      .expect(429, { error: "Too many shares created. Try again later." });
+  });
+
   it("sandboxes shared HTML instead of embedding it into the viewer", async () => {
     const dataDir = await mkdtemp(path.join(tmpdir(), "spechub-share-html-"));
     const app = createShareService({ dataDir });

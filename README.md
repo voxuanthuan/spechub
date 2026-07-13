@@ -128,6 +128,32 @@ docker run --rm -p 8787:8787 -v spechub-share-data:/data \
   -e SPECHUB_SHARE_PUBLIC_URL=https://share.example.com spechub-share
 ```
 
+### Vercel deployment
+
+The repository also includes a Vercel Functions adapter that keeps the same share API and public
+viewer while replacing local filesystem state with:
+
+- a [**private Vercel Blob** store](https://vercel.com/docs/vercel-blob/private-storage) for
+  sanitized document snapshots;
+- [**Upstash Redis**](https://vercel.com/marketplace/upstash) for management-secret hashes,
+  snapshot metadata, and distributed rate limits.
+
+Deploy it as a separate Vercel project:
+
+1. Import this repository and use the repository root. `vercel.json` routes the project to the
+   Express share function in `api/index.ts`.
+2. Create a **private** Blob store in Vercel Storage and connect it to the project. Vercel OIDC is
+   used automatically; `BLOB_READ_WRITE_TOKEN` is only needed for local development.
+3. Install the Upstash Redis integration from the Vercel Marketplace and connect a database. It
+   provides `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
+4. Optionally set `SPECHUB_SHARE_PUBLIC_URL` to the canonical production origin, such as
+   `https://share.example.com`, then deploy.
+5. Verify `https://share.example.com/health`, then use that origin as SpecHub's Share server URL.
+
+The Vercel Hobby and connected storage free tiers are suitable for light personal usage, subject
+to their current request, storage, and transfer limits. If a limit is exhausted, publishing or
+viewing may stop until the provider resets the allowance or the project is upgraded.
+
 ## Develop
 
 ```sh

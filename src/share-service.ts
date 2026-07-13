@@ -1,10 +1,13 @@
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
-import { access, mkdir, readFile, rename, unlink, writeFile } from "node:fs/promises";
 import { createServer, type Server } from "node:http";
-import path from "node:path";
 import express, { type Express, type NextFunction, type Request, type Response } from "express";
 import { renderMarkdown } from "./markdown.js";
 import { expandHome } from "./paths.js";
+import {
+  createFileShareStore,
+  type ShareStore,
+  type StoredShare
+} from "./share-store.js";
 import type { DocumentCategory, DocumentKind, SharedDocument } from "./types.js";
 
 export const DEFAULT_SHARE_DATA_DIR = "~/.local/share/spechub-share";
@@ -12,19 +15,17 @@ const MAX_SHARED_DOCUMENT_BYTES = 2 * 1024 * 1024;
 const CREATE_LIMIT = 20;
 const CREATE_WINDOW_MS = 60 * 60 * 1000;
 
-interface StoredShare {
-  id: string;
-  secretHash: string;
-  document: SharedDocument;
-  createdAt: string;
-  updatedAt: string;
+export interface ShareCreateLimiter {
+  allow(identifier: string, timestamp: number): Promise<boolean>;
 }
 
-interface ShareServiceOptions {
+export interface ShareServiceOptions {
   dataDir?: string;
   publicUrl?: string;
   now?: () => Date;
   trustProxy?: boolean | number;
+  store?: ShareStore;
+  createLimiter?: ShareCreateLimiter;
 }
 
 export function createShareService(options: ShareServiceOptions = {}): Express {
@@ -32,7 +33,8 @@ export function createShareService(options: ShareServiceOptions = {}): Express {
   const dataDir = expandHome(options.dataDir ?? process.env.SPECHUB_SHARE_DATA_DIR ?? DEFAULT_SHARE_DATA_DIR);
   const configuredPublicUrl = normalizePublicUrl(options.publicUrl ?? process.env.SPECHUB_SHARE_PUBLIC_URL);
   const now = options.now ?? (() => new Date());
-  const creates = new Map<string, number[]>();
+  const store = options.store ?? createFileShareStore(dataDir);
+  const createLimiter = options.createLimiter ?? createMemoryShareCreateLimiter();
 
   app.disable("x-powered-by");
   app.set("trust proxy", options.trustProxy ?? parseTrustProxy(process.env.SPECHUB_SHARE_TRUST_PROXY));
@@ -49,32 +51,30 @@ export function createShareService(options: ShareServiceOptions = {}): Express {
   });
 
   app.post("/api/shares", asyncRoute(async (request, response) => {
-    enforceCreateLimit(request, creates, now().getTime());
+    const timestamp = now().getTime();
+    await enforceCreateLimit(request, createLimiter, timestamp);
     const document = parseSharedDocument(request.body?.document);
-    const id = await createShareId(dataDir);
     const secret = randomBytes(32).toString("base64url");
-    const timestamp = now().toISOString();
-    const share: StoredShare = {
-      id,
+    const createdAt = new Date(timestamp).toISOString();
+    const share = await createStoredShare(store, {
       secretHash: hashSecret(secret),
       document,
-      createdAt: timestamp,
-      updatedAt: timestamp
-    };
-    await writeShare(share, dataDir);
+      createdAt,
+      updatedAt: createdAt
+    });
     response.status(201).json({
-      id,
+      id: share.id,
       secret,
-      url: `${shareBaseUrl(request, configuredPublicUrl)}/s/${id}`,
-      updatedAt: timestamp
+      url: `${shareBaseUrl(request, configuredPublicUrl)}/s/${share.id}`,
+      updatedAt: createdAt
     });
   }));
 
   app.put("/api/shares/:id", asyncRoute(async (request, response) => {
-    const share = await requireManagedShare(request.params.id, request.body?.secret, dataDir);
+    const share = await requireManagedShare(request.params.id, request.body?.secret, store);
     const document = parseSharedDocument(request.body?.document);
     const updatedAt = now().toISOString();
-    await writeShare({ ...share, document, updatedAt }, dataDir);
+    await store.update({ ...share, document, updatedAt });
     response.json({
       id: share.id,
       url: `${shareBaseUrl(request, configuredPublicUrl)}/s/${share.id}`,
@@ -83,13 +83,13 @@ export function createShareService(options: ShareServiceOptions = {}): Express {
   }));
 
   app.delete("/api/shares/:id", asyncRoute(async (request, response) => {
-    await requireManagedShare(request.params.id, request.body?.secret, dataDir);
-    await unlink(sharePath(request.params.id, dataDir));
+    await requireManagedShare(request.params.id, request.body?.secret, store);
+    await store.delete(request.params.id);
     response.status(204).end();
   }));
 
   app.get("/api/shares/:id/data", asyncRoute(async (request, response) => {
-    const share = await readShare(request.params.id, dataDir);
+    const share = await store.read(request.params.id);
     if (!share) {
       response.status(404).json({ error: "Share not found." });
       return;
@@ -104,7 +104,7 @@ export function createShareService(options: ShareServiceOptions = {}): Express {
   }));
 
   app.get("/s/:id", asyncRoute(async (request, response) => {
-    const share = await readShare(request.params.id, dataDir);
+    const share = await store.read(request.params.id);
     if (!share) {
       response.status(404).type("html").send(notFoundPage());
       return;
@@ -124,7 +124,7 @@ export function createShareService(options: ShareServiceOptions = {}): Express {
   }));
 
   app.get("/s/:id/raw", asyncRoute(async (request, response) => {
-    const share = await readShare(request.params.id, dataDir);
+    const share = await store.read(request.params.id);
     if (!share || share.document.kind !== "html") {
       response.status(404).end();
       return;
@@ -221,8 +221,8 @@ function isString(value: unknown, maxLength: number): value is string {
   return typeof value === "string" && value.length > 0 && value.length <= maxLength;
 }
 
-async function requireManagedShare(id: string, secret: unknown, dataDir: string): Promise<StoredShare> {
-  const share = await readShare(id, dataDir);
+async function requireManagedShare(id: string, secret: unknown, store: ShareStore): Promise<StoredShare> {
+  const share = await store.read(id);
   if (!share) throw new ShareServiceError(404, "Share not found.");
   if (typeof secret !== "string" || !safeSecretEqual(share.secretHash, hashSecret(secret))) {
     throw new ShareServiceError(403, "Invalid share management secret.");
@@ -230,38 +230,16 @@ async function requireManagedShare(id: string, secret: unknown, dataDir: string)
   return share;
 }
 
-async function createShareId(dataDir: string): Promise<string> {
-  await mkdir(dataDir, { recursive: true });
+async function createStoredShare(
+  store: ShareStore,
+  share: Omit<StoredShare, "id">
+): Promise<StoredShare> {
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const id = randomBytes(9).toString("base64url");
-    try {
-      await access(sharePath(id, dataDir));
-    } catch {
-      return id;
-    }
+    const candidate = { ...share, id };
+    if (await store.create(candidate)) return candidate;
   }
   throw new Error("Unable to allocate a share ID.");
-}
-
-async function readShare(id: string, dataDir: string): Promise<StoredShare | undefined> {
-  if (!/^[A-Za-z0-9_-]{12}$/.test(id)) return undefined;
-  try {
-    return JSON.parse(await readFile(sharePath(id, dataDir), "utf8")) as StoredShare;
-  } catch {
-    return undefined;
-  }
-}
-
-async function writeShare(share: StoredShare, dataDir: string): Promise<void> {
-  await mkdir(dataDir, { recursive: true });
-  const filePath = sharePath(share.id, dataDir);
-  const tempPath = `${filePath}.tmp`;
-  await writeFile(tempPath, `${JSON.stringify(share, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-  await rename(tempPath, filePath);
-}
-
-function sharePath(id: string, dataDir: string): string {
-  return path.join(dataDir, `${id}.json`);
 }
 
 function hashSecret(secret: string): string {
@@ -297,14 +275,28 @@ function shareBaseUrl(request: Request, configuredPublicUrl: string | undefined)
   return configuredPublicUrl ?? `${request.protocol}://${request.get("host")}`;
 }
 
-function enforceCreateLimit(request: Request, creates: Map<string, number[]>, timestamp: number): void {
-  const key = request.ip || "unknown";
-  const recent = (creates.get(key) ?? []).filter((createdAt) => timestamp - createdAt < CREATE_WINDOW_MS);
-  if (recent.length >= CREATE_LIMIT) {
+async function enforceCreateLimit(
+  request: Request,
+  limiter: ShareCreateLimiter,
+  timestamp: number
+): Promise<void> {
+  if (!await limiter.allow(request.ip || "unknown", timestamp)) {
     throw new ShareServiceError(429, "Too many shares created. Try again later.");
   }
-  recent.push(timestamp);
-  creates.set(key, recent);
+}
+
+function createMemoryShareCreateLimiter(): ShareCreateLimiter {
+  const creates = new Map<string, number[]>();
+  return {
+    async allow(identifier, timestamp) {
+      const recent = (creates.get(identifier) ?? [])
+        .filter((createdAt) => timestamp - createdAt < CREATE_WINDOW_MS);
+      if (recent.length >= CREATE_LIMIT) return false;
+      recent.push(timestamp);
+      creates.set(identifier, recent);
+      return true;
+    }
+  };
 }
 
 function renderSharePage(share: StoredShare): string {
