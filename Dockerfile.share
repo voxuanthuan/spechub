@@ -1,0 +1,16 @@
+FROM node:22.17.0-bookworm-slim
+
+WORKDIR /app
+RUN npm install --global pnpm@10.12.4
+
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml tsconfig.json tsconfig.server.json ./
+RUN pnpm install --frozen-lockfile
+
+COPY src ./src
+RUN pnpm build:server
+
+ENV SPECHUB_SHARE_DATA_DIR=/data
+EXPOSE 8787
+VOLUME ["/data"]
+
+CMD ["node", "dist/src/share-service-cli.js", "--host", "0.0.0.0", "--port", "8787"]

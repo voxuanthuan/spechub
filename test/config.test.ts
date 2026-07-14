@@ -1,7 +1,14 @@
 import { mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { normalizeRoots, readConfigFile, resolveConfig, updateRoots } from "../src/config.js";
+import {
+  normalizeRoots,
+  normalizeShareServerUrl,
+  readConfigFile,
+  resolveConfig,
+  updateRoots,
+  updateShareServerUrl
+} from "../src/config.js";
 
 describe("resolveConfig", () => {
   it("keeps common agent sources when a legacy roots config is present", async () => {
@@ -145,5 +152,31 @@ describe("updateRoots", () => {
     await updateRoots(configPath, ["~/work"]);
     const after = (await readConfigFile(configPath)) as { roots: string[] };
     expect(after.roots).toEqual(["~/work"]);
+  });
+});
+
+describe("share server config", () => {
+  it("normalizes and persists an HTTP share server URL", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-share-url-"));
+    const configPath = path.join(root, "config.json");
+    await writeFile(configPath, JSON.stringify({ roots: ["~/work"] }, null, 2));
+
+    expect(normalizeShareServerUrl(" https://share.example.com/ ")).toBe("https://share.example.com");
+    await updateShareServerUrl(configPath, "https://share.example.com/");
+
+    const after = await readConfigFile(configPath);
+    expect(after.shareServerUrl).toBe("https://share.example.com");
+    expect(after.roots).toEqual(["~/work"]);
+  });
+
+  it("rejects non-HTTP share server URLs and removes an empty value", async () => {
+    expect(() => normalizeShareServerUrl("file:///tmp/share")).toThrow(/http or https/i);
+    expect(() => normalizeShareServerUrl("https://user:pass@share.example.com")).toThrow(/credentials/i);
+
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-share-url-empty-"));
+    const configPath = path.join(root, "config.json");
+    await writeFile(configPath, JSON.stringify({ shareServerUrl: "https://share.example.com" }));
+    await updateShareServerUrl(configPath, "");
+    expect((await readConfigFile(configPath)).shareServerUrl).toBeUndefined();
   });
 });

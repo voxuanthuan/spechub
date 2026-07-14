@@ -17,6 +17,7 @@ export interface ConfigInfo {
   configPath: string;
   roots: ConfigRoot[];
   explicitRoots: boolean;
+  shareServerUrl: string;
   warnings: string[];
 }
 
@@ -51,6 +52,12 @@ export interface DocumentDetail extends DocumentMeta {
 export interface DocumentPayload {
   docs: DocumentMeta[];
   repos: Array<{ name: string; count: number }>;
+}
+
+export interface DocumentShare {
+  id: string;
+  url: string;
+  updatedAt: string;
 }
 
 export interface SpecHubState {

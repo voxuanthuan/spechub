@@ -1,4 +1,4 @@
-import type { AgentFeedbackPayload, AgentOrigin, Annotation, DocumentDetail, DocumentPayload, SpecHubState } from "./types.js";
+import type { AgentFeedbackPayload, AgentOrigin, Annotation, ConfigInfo, DocumentDetail, DocumentPayload, DocumentShare, SpecHubState } from "./types.js";
 
 export function isDesktop() {
   return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
@@ -26,6 +26,38 @@ export async function fetchDocument(id: string): Promise<DocumentDetail> {
   return payload.doc;
 }
 
+export async function fetchDocumentShare(id: string): Promise<DocumentShare | null> {
+  if (isDesktop()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<DocumentShare | null>("get_document_share", { id });
+  }
+  const response = await fetch(`/api/docs/${id}/share`);
+  if (!response.ok) throw new Error("Unable to load sharing status.");
+  const payload = await response.json() as { share: DocumentShare | null };
+  return payload.share;
+}
+
+export async function publishDocumentShare(id: string): Promise<DocumentShare> {
+  if (isDesktop()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<DocumentShare>("share_document", { id });
+  }
+  const response = await fetch(`/api/docs/${id}/share`, { method: "POST" });
+  if (!response.ok) throw new Error(await responseError(response, "Unable to publish document."));
+  const payload = await response.json() as { share: DocumentShare };
+  return payload.share;
+}
+
+export async function unshareDocument(id: string): Promise<void> {
+  if (isDesktop()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    await invoke("unshare_document", { id });
+    return;
+  }
+  const response = await fetch(`/api/docs/${id}/share`, { method: "DELETE" });
+  if (!response.ok) throw new Error(await responseError(response, "Unable to remove public share."));
+}
+
 export async function fetchState(): Promise<SpecHubState> {
   if (isDesktop()) {
     const { invoke } = await import("@tauri-apps/api/core");
@@ -34,6 +66,37 @@ export async function fetchState(): Promise<SpecHubState> {
   const response = await fetch("/api/state");
   if (!response.ok) throw new Error("Unable to load dashboard state.");
   return response.json() as Promise<SpecHubState>;
+}
+
+export async function fetchConfig(): Promise<ConfigInfo> {
+  if (isDesktop()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<ConfigInfo>("get_config_info");
+  }
+  const response = await fetch("/api/config");
+  if (!response.ok) throw new Error("Unable to load settings.");
+  return response.json() as Promise<ConfigInfo>;
+}
+
+export async function updateConfig(roots: string[], shareServerUrl: string): Promise<ConfigInfo> {
+  if (isDesktop()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<ConfigInfo>("update_settings", { roots, shareServerUrl });
+  }
+  const shareResponse = await fetch("/api/config/share-server", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ shareServerUrl })
+  });
+  if (!shareResponse.ok) throw new Error(await responseError(shareResponse, "Unable to save share server URL."));
+
+  const rootsResponse = await fetch("/api/config/roots", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ roots })
+  });
+  if (!rootsResponse.ok) throw new Error(await responseError(rootsResponse, "Unable to save workspace roots."));
+  return rootsResponse.json() as Promise<ConfigInfo>;
 }
 
 export async function patchState(patch: Partial<SpecHubState>): Promise<SpecHubState> {
@@ -148,3 +211,12 @@ export const AGENT_NAMES: Record<AgentOrigin, string> = {
   "copilot-cli": "Copilot CLI",
   "gemini-cli": "Gemini CLI"
 };
+
+async function responseError(response: Response, fallback: string): Promise<string> {
+  try {
+    const payload = await response.json() as { error?: unknown };
+    return typeof payload.error === "string" ? payload.error : fallback;
+  } catch {
+    return fallback;
+  }
+}

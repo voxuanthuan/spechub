@@ -4,7 +4,8 @@
   "private": true,
   "type": "module",
   "bin": {
-    "spechub": "./dist/src/cli.js"
+    "spechub": "./dist/src/cli.js",
+    "spechub-share": "./dist/src/share-service-cli.js"
   },
   "scripts": {
     "build": "pnpm build:web && pnpm build:server",
@@ -14,12 +15,16 @@
     "dev": "pnpm dev:desktop",
     "dev:browser": "pnpm build:web && tsx src/cli.ts --open",
     "dev:desktop": "tauri dev",
+    "dev:share": "tsx src/share-service-cli.ts",
     "dev:web": "next dev",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.11.0",
+    "@upstash/ratelimit": "2.0.8",
+    "@upstash/redis": "1.38.0",
+    "@vercel/blob": "2.5.0",
     "better-sqlite3": "^12.10.1",
     "chokidar": "^4.0.3",
     "commander": "^12.1.0",
@@ -35,7 +40,9 @@
     "sanitize-html": "^2.13.0"
   },
   "pnpm": {
-    "onlyBuiltDependencies": ["better-sqlite3"]
+    "onlyBuiltDependencies": [
+      "better-sqlite3"
+    ]
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.11.2",

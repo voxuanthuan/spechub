@@ -5,13 +5,29 @@ import { ErrorBoundary } from "./components/ErrorBoundary.js";
 import { AnnotationToolbar } from "./components/AnnotationToolbar.js";
 import { AnnotationPanel } from "./components/AnnotationPanel.js";
 import { CommentDialog } from "./components/CommentDialog.js";
+import { ShareDialog } from "./components/ShareDialog.js";
 import {
   AnnotationsIcon, ChevronIcon, CloseIcon, CodeIcon, CopyIcon, EyeOffIcon,
   ExternalIcon, FileIcon, FolderIcon, FullscreenIcon, MoreIcon,
-  PlusCircleIcon, PlusIcon, RefreshIcon, SearchIcon, SettingsIcon,
+  PlusCircleIcon, PlusIcon, RefreshIcon, SearchIcon, SettingsIcon, ShareIcon,
   StarIcon, TrashIcon
 } from "./components/icons/index.js";
-import { deleteAnnotation as apiDeleteAnnotation, fetchAnnotations, fetchDocs, fetchDocument, fetchState, isDesktop, patchState, saveAnnotation, subscribeDocsChanged } from "./lib/api.js";
+import {
+  deleteAnnotation as apiDeleteAnnotation,
+  fetchAnnotations,
+  fetchConfig,
+  fetchDocs,
+  fetchDocument,
+  fetchDocumentShare,
+  fetchState,
+  isDesktop,
+  patchState,
+  publishDocumentShare,
+  saveAnnotation,
+  subscribeDocsChanged,
+  unshareDocument,
+  updateConfig
+} from "./lib/api.js";
 import { filterDocs, normalizeRepoNames, summarizeRepos } from "./lib/filters.js";
 import { formatDate, formatLiveTime } from "./lib/format.js";
 import { sanitizeMarkdown } from "./lib/sanitize.js";
@@ -22,7 +38,7 @@ import {
 import type {
   Accent, AccentTokens, ActiveView, CategoryFilter, ConfigInfo,
   ConfigRoot, DateFilter, Density, DocumentDetail, DocumentMeta,
-  DraftRoot, RepoSummary, SpecHubState
+  DocumentShare, DraftRoot, RepoSummary, SpecHubState
 } from "./lib/types.js";
 import {
   filterPromptCards,
@@ -109,6 +125,11 @@ export default function Home() {
   const [addRootDraft, setAddRootDraft] = useState("");
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
+  const [draftShareServerUrl, setDraftShareServerUrl] = useState("");
+  const [shareOpen, setShareOpen] = useState(false);
+  const [share, setShare] = useState<DocumentShare | null>(null);
+  const [shareLoading, setShareLoading] = useState(false);
+  const [shareError, setShareError] = useState<string | null>(null);
   const [liveUpdatedAt, setLiveUpdatedAt] = useState<number | null>(null);
   const [livePulse, setLivePulse] = useState(false);
   const [toast, setToast] = useState<string | null>(null);
@@ -195,9 +216,13 @@ export default function Home() {
   useEffect(() => {
     if (!selectedId) {
       setSelectedDoc(null);
+      setShare(null);
       return;
     }
     void showDetail(selectedId);
+    void fetchDocumentShare(selectedId)
+      .then(setShare)
+      .catch(() => setShare(null));
   }, [selectedId]);
 
   useEffect(() => {
@@ -211,6 +236,10 @@ export default function Home() {
     function onKeyDown(event: KeyboardEvent) {
       const target = event.target as HTMLElement | null;
       const isTyping = target && ["INPUT", "SELECT", "TEXTAREA"].includes(target.tagName);
+      if (event.key === "Escape" && shareOpen) {
+        setShareOpen(false);
+        return;
+      }
       if (event.key === "Escape" && settingsOpen) {
         setSettingsOpen(false);
         return;
@@ -253,17 +282,17 @@ export default function Home() {
 
     document.addEventListener("keydown", onKeyDown);
     return () => document.removeEventListener("keydown", onKeyDown);
-  }, [activeView, fullView, selectedDoc, selectedId, settingsOpen]);
+  }, [activeView, fullView, selectedDoc, selectedId, settingsOpen, shareOpen]);
 
   useFocusTrap(fullView, fullViewCloseRef);
   useFocusTrap(settingsOpen, settingsCloseRef);
 
   useEffect(() => {
-    document.body.style.overflow = fullView || settingsOpen ? "hidden" : "";
+    document.body.style.overflow = fullView || settingsOpen || shareOpen ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
     };
-  }, [fullView, settingsOpen]);
+  }, [fullView, settingsOpen, shareOpen]);
 
   const repos = useMemo(() => summarizeRepos(docs), [docs]);
   const deferredQuery = useDeferredValue(query);
@@ -494,6 +523,43 @@ export default function Home() {
     toastTimer.current = window.setTimeout(() => setToast(null), 1800);
   }
 
+  async function publishSelectedDocument() {
+    if (!selectedDoc) return;
+    const wasShared = Boolean(share);
+    setShareLoading(true);
+    setShareError(null);
+    try {
+      setShare(await publishDocumentShare(selectedDoc.id));
+      showToast(wasShared ? "Public snapshot updated" : "Public link created");
+    } catch (reason) {
+      setShareError(reason instanceof Error ? reason.message : "Unable to publish document.");
+    } finally {
+      setShareLoading(false);
+    }
+  }
+
+  async function unshareSelectedDocument() {
+    if (!selectedDoc) return;
+    setShareLoading(true);
+    setShareError(null);
+    try {
+      await unshareDocument(selectedDoc.id);
+      setShare(null);
+      setShareOpen(false);
+      showToast("Public link removed");
+    } catch (reason) {
+      setShareError(reason instanceof Error ? reason.message : "Unable to remove public link.");
+    } finally {
+      setShareLoading(false);
+    }
+  }
+
+  async function copyShareLink() {
+    if (!share) return;
+    await navigator.clipboard.writeText(share.url);
+    showToast("Public link copied");
+  }
+
   function hideRepo(name: string) {
     const nextHiddenRepos = normalizeRepoNames([...hiddenRepos, name]);
     const nextHiddenRepoSet = new Set(nextHiddenRepos);
@@ -574,14 +640,14 @@ export default function Home() {
     setAddRootDraft("");
     setSettingsOpen(true);
     try {
-      const response = await fetch("/api/config");
-      if (!response.ok) throw new Error("Unable to load settings.");
-      const info = (await response.json()) as ConfigInfo;
+      const info = await fetchConfig();
       setSettingsInfo(info);
       setDraftRoots(info.roots.map(toDraftRoot));
+      setDraftShareServerUrl(info.shareServerUrl);
     } catch (reason) {
       setSettingsInfo(null);
       setDraftRoots([]);
+      setDraftShareServerUrl("");
       setSettingsError(reason instanceof Error ? reason.message : "Unable to load settings.");
     }
   }
@@ -616,18 +682,10 @@ export default function Home() {
     setSettingsError(null);
     setSettingsSaving(true);
     try {
-      const response = await fetch("/api/config/roots", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ roots: candidate })
-      });
-      if (!response.ok) {
-        const payload = (await response.json().catch(() => ({}))) as { error?: string };
-        throw new Error(payload.error ?? "Unable to save workspace roots.");
-      }
-      const info = (await response.json()) as ConfigInfo;
+      const info = await updateConfig(candidate, draftShareServerUrl);
       setSettingsInfo(info);
       setDraftRoots(info.roots.map(toDraftRoot));
+      setDraftShareServerUrl(info.shareServerUrl);
       setSettingsOpen(false);
       await loadDocs({ force: true });
     } catch (reason) {
@@ -1032,6 +1090,10 @@ export default function Home() {
                   <AnnotationsIcon />
                   {annotations.length > 0 ? `Annotations (${annotations.length})` : "Annotate"}
                 </button>
+                <button className="btn icon-label" type="button" disabled={!selectedDoc} onClick={() => { setShareError(null); setShareOpen(true); }}>
+                  <ShareIcon />
+                  {share ? "Shared" : "Share"}
+                </button>
                 <button className="btn primary" type="button" disabled={!selectedDoc} title="Open full reading view (F)" onClick={() => setFullView(true)}>
                   <FullscreenIcon />
                   Full view
@@ -1143,6 +1205,18 @@ export default function Home() {
         </div>
       </div>
 
+      <ShareDialog
+        open={shareOpen}
+        title={selectedDoc?.title ?? ""}
+        share={share}
+        loading={shareLoading}
+        error={shareError}
+        onClose={() => setShareOpen(false)}
+        onPublish={() => void publishSelectedDocument()}
+        onCopy={() => void copyShareLink()}
+        onUnshare={() => void unshareSelectedDocument()}
+      />
+
       <div className="modal-backdrop" data-open={settingsOpen} onClick={(event) => event.target === event.currentTarget && closeSettings()}>
         <div className="modal settings-modal" role="dialog" aria-modal="true" aria-label="Workspace settings">
           <div className="modal-bar">
@@ -1228,6 +1302,22 @@ export default function Home() {
                 </button>
               </form>
               <p className="settings-hint">Tip: use ~ to reference your home directory. Restart spechub if you ran it with --roots.</p>
+            </div>
+
+            <div className="settings-section">
+              <h3>Public sharing</h3>
+              <label className="field">
+                <span>Share server URL</span>
+                <input
+                  type="url"
+                  aria-label="Share server URL"
+                  spellCheck={false}
+                  value={draftShareServerUrl}
+                  placeholder="https://share.example.com"
+                  onChange={(event) => setDraftShareServerUrl(event.target.value)}
+                />
+              </label>
+              <p className="settings-hint">The hosted service stores public snapshots and returns unlisted review links.</p>
             </div>
 
             <div className="settings-section">
@@ -1433,5 +1523,3 @@ function rootDisplayStatus(entry: DraftRoot): { state: "ok" | "missing" | "new";
     ? { state: "ok", label: "Found" }
     : { state: "missing", label: "Missing" };
 }
-
-

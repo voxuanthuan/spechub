@@ -221,6 +221,32 @@ describe("server routes", () => {
       .expect(400);
   });
 
+  it("persists and clears the public share server URL", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-server-share-config-"));
+    const configPath = path.join(root, "config.json");
+    await writeFile(configPath, JSON.stringify({ roots: [root] }));
+    const app = createApp({ configPath });
+
+    const saved = await request(app)
+      .patch("/api/config/share-server")
+      .send({ shareServerUrl: "https://share.example.com/" })
+      .expect(200);
+    expect(saved.body.shareServerUrl).toBe("https://share.example.com");
+    expect(JSON.parse(await readFile(configPath, "utf8")).shareServerUrl).toBe("https://share.example.com");
+
+    await request(app)
+      .patch("/api/config/share-server")
+      .send({ shareServerUrl: "file:///tmp/share" })
+      .expect(400);
+
+    const cleared = await request(app)
+      .patch("/api/config/share-server")
+      .send({ shareServerUrl: "" })
+      .expect(200);
+    expect(cleared.body.shareServerUrl).toBe("");
+    expect(JSON.parse(await readFile(configPath, "utf8")).shareServerUrl).toBeUndefined();
+  });
+
   it("recovers from a corrupt config file with a warning", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "spechub-server-corrupt-config-"));
     const configPath = path.join(root, "config.json");
