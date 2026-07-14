@@ -133,8 +133,9 @@ docker run --rm -p 8787:8787 -v spechub-share-data:/data \
 The repository also includes a Vercel Functions adapter that keeps the same share API and public
 viewer while replacing local filesystem state with:
 
-- a [**private Vercel Blob** store](https://vercel.com/docs/vercel-blob/private-storage) for
-  sanitized document snapshots;
+- either a [**private Vercel Blob** store](https://vercel.com/docs/vercel-blob/private-storage) or
+  a private [**Cloudflare R2** bucket](https://developers.cloudflare.com/r2/) for sanitized
+  document snapshots;
 - [**Upstash Redis**](https://vercel.com/marketplace/upstash) for management-secret hashes,
   snapshot metadata, and distributed rate limits.
 
@@ -142,10 +143,28 @@ Deploy it as a separate Vercel project:
 
 1. Import this repository and use the repository root. `vercel.json` routes the project to the
    Express share function in `api/index.ts`.
-2. Create a **private** Blob store in Vercel Storage and connect it to the project. Vercel OIDC is
-   used automatically; `BLOB_READ_WRITE_TOKEN` is only needed for local development.
+2. Configure one private snapshot backend:
+   - **Vercel Blob:** leave `SPECHUB_SHARE_STORAGE=vercel-blob`, create a **private** Blob store,
+     and connect it to the project. Vercel OIDC is used automatically;
+     `BLOB_READ_WRITE_TOKEN` is only needed for local development.
+   - **Cloudflare R2:** create a private bucket, create an
+     [Object Read & Write API token](https://developers.cloudflare.com/r2/api/tokens/) scoped to
+     that bucket, and set:
+
+     ```env
+     SPECHUB_SHARE_STORAGE=cloudflare-r2
+     CLOUDFLARE_R2_ACCOUNT_ID=your-account-id
+     CLOUDFLARE_R2_ACCESS_KEY_ID=your-token-access-key-id
+     CLOUDFLARE_R2_SECRET_ACCESS_KEY=your-token-secret-access-key
+     CLOUDFLARE_R2_BUCKET=spechub-share
+     ```
+
+     Keep the R2 bucket's public development URL and custom-domain access disabled. The Vercel
+     Function reads snapshots through authenticated S3-compatible requests.
 3. Install the Upstash Redis integration from the Vercel Marketplace and connect a database. It
-   provides `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`.
+   provides `UPSTASH_REDIS_REST_URL` and `UPSTASH_REDIS_REST_TOKEN`. If the integration creates
+   only `KV_REST_API_URL` and `KV_REST_API_TOKEN`, add the required Upstash names as aliases in
+   Vercel project environment variables.
 4. Optionally set `SPECHUB_SHARE_PUBLIC_URL` to the canonical production origin, such as
    `https://share.example.com`, then deploy.
 5. Verify `https://share.example.com/health`, then use that origin as SpecHub's Share server URL.
