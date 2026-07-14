@@ -1,6 +1,6 @@
 [package]
 name = "spechub"
-version = "0.1.0"
+version = "0.1.1"
 description = "Desktop dashboard for local specs and implementation plans"
 authors = ["SpecHub"]
 edition = "2021"
