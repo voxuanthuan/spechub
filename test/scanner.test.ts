@@ -3,7 +3,7 @@ import os from "node:os";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import Database from "better-sqlite3";
-import { DEFAULT_DOC_PATTERNS, defaultConfig } from "../src/config.js";
+import { DEFAULT_DOC_PATTERNS, defaultConfig, resolveConfig } from "../src/config.js";
 import { scanDocuments } from "../src/scanner.js";
 
 async function fixtureRoot() {
@@ -712,3 +712,200 @@ async function writeOpenCodeDb(dbPath: string, repo: string): Promise<void> {
 
   db.close();
 }
+
+describe("scanDocuments files mode (load all md/html under a path)", () => {
+  it("loads every markdown and HTML file under the root, grouped by source name", async () => {
+    const root = await fixtureRoot();
+    const issues = path.join(root, "issues");
+    await mkdir(path.join(issues, "subdir"), { recursive: true });
+    await writeFile(path.join(issues, "01-provider-choice.md"), "# Provider choice\n");
+    await writeFile(path.join(issues, "02-session-storage.md"), "# Session storage\n");
+    await writeFile(path.join(issues, "map.html"), "<title>Map</title>");
+    await writeFile(path.join(issues, "subdir", "03-deep.md"), "# Deep\n");
+    await writeFile(path.join(issues, "notes.txt"), "not a doc");
+    await writeFile(path.join(issues, "package.json"), "{}");
+
+    const docs = await scanDocuments({
+      sources: [
+        {
+          name: "psr-issues",
+          mode: "files",
+          roots: [issues]
+        }
+      ]
+    });
+
+    expect(docs.map((doc) => doc.relativePath).sort()).toEqual([
+      "01-provider-choice.md",
+      "02-session-storage.md",
+      "map.html",
+      "subdir/03-deep.md"
+    ]);
+    expect(docs.every((doc) => doc.repoName === "psr-issues" && doc.sourceName === "psr-issues")).toBe(true);
+    expect(docs.find((doc) => doc.relativePath === "01-provider-choice.md")).toMatchObject({
+      title: "Provider choice",
+      kind: "markdown"
+    });
+    expect(docs.find((doc) => doc.relativePath === "map.html")).toMatchObject({
+      title: "Map",
+      kind: "html"
+    });
+  });
+
+  it("honors exclude globs to scope the loaded files", async () => {
+    const root = await fixtureRoot();
+    const issues = path.join(root, "issues");
+    await mkdir(issues, { recursive: true });
+    await writeFile(path.join(issues, "01-provider-choice.md"), "# Provider choice\n");
+    await writeFile(path.join(issues, "01-provider-choice-draft.md"), "# Draft\n");
+
+    const docs = await scanDocuments({
+      sources: [
+        {
+          name: "psr-issues",
+          mode: "files",
+          roots: [issues],
+          exclude: ["**/*-draft.md"]
+        }
+      ]
+    });
+
+    expect(docs.map((doc) => doc.relativePath)).toEqual(["01-provider-choice.md"]);
+  });
+
+  it("uses include globs to narrow which files belong to the group", async () => {
+    const root = await fixtureRoot();
+    const issues = path.join(root, "issues");
+    await mkdir(issues, { recursive: true });
+    await writeFile(path.join(issues, "01-provider-choice.md"), "# Provider choice\n");
+    await writeFile(path.join(issues, "map.html"), "<title>Map</title>");
+
+    const docs = await scanDocuments({
+      sources: [
+        {
+          name: "psr-issues",
+          mode: "files",
+          roots: [issues],
+          include: ["**/*.md"]
+        }
+      ]
+    });
+
+    expect(docs.map((doc) => doc.relativePath)).toEqual(["01-provider-choice.md"]);
+  });
+
+  it("returns no documents for a missing root", async () => {
+    const root = await fixtureRoot();
+    const docs = await scanDocuments({
+      sources: [
+        {
+          name: "missing",
+          mode: "files",
+          roots: [path.join(root, "does-not-exist")]
+        }
+      ]
+    });
+    expect(docs).toEqual([]);
+  });
+
+  it("keeps an explicit files source outside the workspace roots when both are configured", async () => {
+    const root = await fixtureRoot();
+    const workspace = path.join(root, "workspace");
+    const research = path.join(root, "research");
+    await mkdir(path.join(workspace, "repo"), { recursive: true });
+    await mkdir(path.join(workspace, "repo", "docs", "specs"), { recursive: true });
+    await mkdir(research, { recursive: true });
+    await writeFile(path.join(workspace, "repo", "package.json"), "{}");
+    await writeFile(path.join(workspace, "repo", "docs", "specs", "api.md"), "# API\n");
+    await writeFile(path.join(research, "02-findings.md"), "# Findings\n");
+
+    const configPath = path.join(root, "config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify(
+        {
+          roots: [workspace],
+          sources: [
+            { name: "repositories", mode: "repositories", roots: [workspace] },
+            { name: "research", mode: "files", roots: [research] }
+          ]
+        },
+        null,
+        2
+      )
+    );
+
+    const config = await resolveConfig({ configPath });
+    expect(config.restrictAgentStorageToRoots).toBe(false);
+
+    const docs = await scanDocuments(config);
+    expect(docs.find((doc) => doc.relativePath === "02-findings.md")).toMatchObject({
+      sourceName: "research",
+      repoName: "research"
+    });
+    expect(docs.find((doc) => doc.relativePath === "docs/specs/api.md")).toMatchObject({
+      repoName: "repo"
+    });
+  });
+});
+
+describe("scanDocuments workflow awareness (Matt Pocock skills layout)", () => {
+  it("indexes tracker artifacts, domain docs, ADRs, and the out-of-scope KB with parsed metadata", async () => {
+    const root = await fixtureRoot();
+    const repo = path.join(root, "gamma");
+    await mkdir(path.join(repo, ".scratch", "auth-redesign", "issues"), { recursive: true });
+    await mkdir(path.join(repo, ".out-of-scope"), { recursive: true });
+    await mkdir(path.join(repo, "docs", "adr"), { recursive: true });
+    await mkdir(path.join(repo, "docs", "agents"), { recursive: true });
+
+    await writeFile(path.join(repo, "package.json"), "{}");
+    await writeFile(path.join(repo, ".scratch", "auth-redesign", "map.md"), "# Auth Redesign Map\n\n## Destination\n\nShip the new auth flow.\n");
+    await writeFile(path.join(repo, ".scratch", "auth-redesign", "spec.md"), "# Auth Redesign Spec\n\nStatus: ready-for-agent\n");
+    await writeFile(
+      path.join(repo, ".scratch", "auth-redesign", "issues", "01-provider-choice.md"),
+      "# Provider choice\n\nType: grilling\nStatus: resolved\n"
+    );
+    await writeFile(
+      path.join(repo, ".scratch", "auth-redesign", "issues", "02-session-storage.md"),
+      "# Session storage\n\nType: research\nBlocked by: 01\n"
+    );
+    await writeFile(path.join(repo, ".out-of-scope", "dark-mode.md"), "# Dark Mode\n\nRejected.\n");
+    await writeFile(path.join(repo, "CONTEXT.md"), "# Glossary\n\n**Effort** — one wayfinding journey.\n");
+    await writeFile(path.join(repo, "docs", "adr", "0001-postgres.md"), "# ADR 0001: Postgres\n");
+    await writeFile(path.join(repo, "docs", "agents", "issue-tracker.md"), "# Issue tracker: Local Markdown\n");
+
+    const docs = await scanDocuments({ roots: [root] });
+    const byPath = new Map(docs.map((doc) => [doc.relativePath, doc]));
+
+    expect(byPath.get(".scratch/auth-redesign/map.md")?.workflow).toEqual({
+      artifact: "wayfinder-map",
+      effort: "auth-redesign"
+    });
+    expect(byPath.get(".scratch/auth-redesign/spec.md")?.workflow).toEqual({
+      artifact: "feature-spec",
+      effort: "auth-redesign",
+      triageState: "ready-for-agent"
+    });
+    expect(byPath.get(".scratch/auth-redesign/spec.md")?.category).toBe("spec");
+    expect(byPath.get(".scratch/auth-redesign/issues/01-provider-choice.md")?.workflow).toEqual({
+      artifact: "wayfinder-ticket",
+      effort: "auth-redesign",
+      ticketNumber: "01",
+      ticketType: "grilling",
+      ticketStatus: "resolved"
+    });
+    expect(byPath.get(".scratch/auth-redesign/issues/02-session-storage.md")?.workflow).toEqual({
+      artifact: "wayfinder-ticket",
+      effort: "auth-redesign",
+      ticketNumber: "02",
+      ticketType: "research",
+      ticketStatus: "open",
+      blockedBy: ["01"]
+    });
+    expect(byPath.get(".out-of-scope/dark-mode.md")?.workflow?.artifact).toBe("out-of-scope");
+    expect(byPath.get("CONTEXT.md")?.workflow?.artifact).toBe("domain-context");
+    expect(byPath.get("docs/adr/0001-postgres.md")?.workflow?.artifact).toBe("adr");
+    expect(byPath.get("docs/agents/issue-tracker.md")?.workflow?.artifact).toBe("agent-config");
+  });
+});
+

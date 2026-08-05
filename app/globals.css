@@ -987,6 +987,247 @@ button:disabled,
   background: oklch(0.30 0.05 156);
 }
 
+/* Workflow badges (Matt Pocock engineering-skills artifacts) */
+
+.wf {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+button.wf {
+  border: 0;
+  cursor: pointer;
+}
+
+button.wf:hover {
+  filter: brightness(0.95);
+}
+
+.wf[data-artifact="wayfinder-map"] {
+  color: oklch(0.5 0.11 300);
+  background: oklch(0.95 0.035 300);
+}
+
+.wf[data-artifact="wayfinder-ticket"] {
+  color: oklch(0.5 0.12 250);
+  background: oklch(0.95 0.035 250);
+}
+
+.wf[data-artifact="feature-spec"] {
+  color: oklch(0.5 0.10 200);
+  background: oklch(0.95 0.035 200);
+}
+
+.wf[data-artifact="adr"] {
+  color: oklch(0.52 0.11 65);
+  background: oklch(0.95 0.04 70);
+}
+
+.wf[data-artifact="domain-context"] {
+  color: oklch(0.48 0.12 156);
+  background: oklch(0.95 0.035 156);
+}
+
+.wf[data-artifact="agent-config"] {
+  color: oklch(0.5 0.03 250);
+  background: oklch(0.95 0.012 250);
+}
+
+.wf[data-artifact="out-of-scope"] {
+  color: oklch(0.5 0.13 25);
+  background: oklch(0.95 0.03 25);
+}
+
+.wf[data-triage="needs-triage"] {
+  color: oklch(0.52 0.11 65);
+  background: oklch(0.95 0.04 70);
+}
+
+.wf[data-triage="needs-info"] {
+  color: oklch(0.5 0.11 300);
+  background: oklch(0.95 0.035 300);
+}
+
+.wf[data-triage="ready-for-agent"] {
+  color: oklch(0.48 0.12 156);
+  background: oklch(0.95 0.035 156);
+}
+
+.wf[data-triage="ready-for-human"] {
+  color: oklch(0.5 0.12 250);
+  background: oklch(0.95 0.035 250);
+}
+
+.wf[data-triage="wontfix"] {
+  color: oklch(0.5 0.02 250);
+  background: oklch(0.95 0.012 250);
+}
+
+.wf[data-status="open"],
+.wf[data-type] {
+  color: oklch(0.5 0.03 250);
+  background: oklch(0.95 0.012 250);
+}
+
+.wf[data-status="claimed"] {
+  color: oklch(0.52 0.11 65);
+  background: oklch(0.95 0.04 70);
+}
+
+.wf[data-status="resolved"] {
+  color: oklch(0.48 0.12 156);
+  background: oklch(0.95 0.035 156);
+}
+
+[data-theme="dark"] .wf[data-artifact="wayfinder-map"],
+[data-theme="dark"] .wf[data-triage="needs-info"] {
+  color: oklch(0.82 0.09 300);
+  background: oklch(0.32 0.05 300);
+}
+
+[data-theme="dark"] .wf[data-artifact="wayfinder-ticket"],
+[data-theme="dark"] .wf[data-triage="ready-for-human"] {
+  color: oklch(0.82 0.09 250);
+  background: oklch(0.32 0.05 250);
+}
+
+[data-theme="dark"] .wf[data-artifact="feature-spec"] {
+  color: oklch(0.82 0.09 200);
+  background: oklch(0.32 0.05 200);
+}
+
+[data-theme="dark"] .wf[data-artifact="adr"],
+[data-theme="dark"] .wf[data-triage="needs-triage"],
+[data-theme="dark"] .wf[data-status="claimed"] {
+  color: oklch(0.84 0.1 70);
+  background: oklch(0.34 0.05 65);
+}
+
+[data-theme="dark"] .wf[data-artifact="domain-context"],
+[data-theme="dark"] .wf[data-triage="ready-for-agent"],
+[data-theme="dark"] .wf[data-status="resolved"] {
+  color: oklch(0.82 0.09 156);
+  background: oklch(0.30 0.05 156);
+}
+
+[data-theme="dark"] .wf[data-artifact="agent-config"],
+[data-theme="dark"] .wf[data-triage="wontfix"],
+[data-theme="dark"] .wf[data-status="open"],
+[data-theme="dark"] .wf[data-type] {
+  color: oklch(0.78 0.03 250);
+  background: oklch(0.32 0.02 250);
+}
+
+[data-theme="dark"] .wf[data-artifact="out-of-scope"] {
+  color: oklch(0.8 0.1 25);
+  background: oklch(0.34 0.05 25);
+}
+
+/* Triage state chips (GitHub-label style filtering) */
+
+.state-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--c-border);
+}
+
+.state-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--c-border);
+  border-radius: 999px;
+  background: var(--c-surface);
+  color: var(--c-ink-2);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.state-chip:hover {
+  background: var(--c-hover);
+}
+
+.state-chip[data-active="true"] {
+  border-color: var(--accent-strong);
+  background: var(--accent-soft);
+  color: var(--accent-strong);
+}
+
+.chip-count {
+  min-width: 18px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--c-raised);
+  color: var(--c-ink-3);
+  text-align: center;
+}
+
+.state-chip[data-active="true"] .chip-count {
+  background: var(--c-surface);
+  color: var(--accent-strong);
+}
+
+/* Workflow metadata line in the document header */
+
+.wf-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--c-ink-3);
+}
+
+.wf-effort,
+.wf-ticket,
+.wf-blocked {
+  white-space: nowrap;
+}
+
+.wf-queue {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+}
+
+.wf-queue-btn {
+  padding: 2px 8px;
+  border: 1px solid var(--c-border);
+  border-radius: var(--radius-sm);
+  background: var(--c-surface);
+  color: var(--c-ink-2);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wf-queue-btn:hover:not(:disabled) {
+  background: var(--c-hover);
+}
+
+.wf-queue-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.wf-queue-pos {
+  color: var(--c-ink-3);
+}
+
 .repo-tag,
 .date {
   min-width: 0;
@@ -2073,6 +2314,9 @@ button:disabled,
   flex-direction: column;
   gap: 18px;
   background: var(--c-page);
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
 }
 
 .settings-meta {
@@ -2301,6 +2545,20 @@ button:disabled,
   display: grid;
   grid-template-columns: 1fr auto;
   gap: 8px;
+}
+
+/* File-folder rows pair a group name with a folder path. */
+.root-row.file-source-row {
+  grid-template-columns: minmax(90px, 0.7fr) minmax(0, 1.3fr) auto;
+}
+
+.file-source-name {
+  font-family: var(--font-sans);
+  font-weight: 600;
+}
+
+.file-source-add {
+  grid-template-columns: minmax(90px, 0.6fr) minmax(0, 1.4fr) auto;
 }
 
 .settings-hint {

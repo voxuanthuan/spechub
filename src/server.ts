@@ -11,6 +11,7 @@ import {
   expandHome,
   readConfigFile,
   resolveConfig,
+  updateFileSources,
   updateRoots,
   updateShareServerUrl,
   updateTitleOverride
@@ -165,6 +166,30 @@ export function createApp(config: RuntimeSpecHubConfig = {}, index: DocumentInde
       await updateRoots(config.configPath ?? DEFAULT_CONFIG_PATH, candidate);
     } catch (error) {
       response.status(400).json({ error: error instanceof Error ? error.message : "Invalid roots." });
+      return;
+    }
+    await index.refresh();
+    response.json(await describeConfig(config));
+  }));
+
+  app.patch("/api/config/files", asyncRoute(async (request, response) => {
+    const candidate = request.body?.sources;
+    const isValid = Array.isArray(candidate) && candidate.every((entry) => {
+      const source = entry as { name?: unknown; roots?: unknown };
+      return source && typeof source.name === "string" && Array.isArray(source.roots) && source.roots.every((root) => typeof root === "string");
+    });
+    if (!isValid) {
+      response.status(400).json({ error: "sources must be an array of { name, roots }." });
+      return;
+    }
+    if (candidate.length > 50) {
+      response.status(400).json({ error: "Too many file folders (max 50)." });
+      return;
+    }
+    try {
+      await updateFileSources(config.configPath ?? DEFAULT_CONFIG_PATH, candidate);
+    } catch (error) {
+      response.status(400).json({ error: error instanceof Error ? error.message : "Invalid file folders." });
       return;
     }
     await index.refresh();
@@ -396,6 +421,7 @@ async function currentConfig(config: RuntimeSpecHubConfig): Promise<Partial<Spec
 async function describeConfig(config: RuntimeSpecHubConfig): Promise<{
   configPath: string;
   roots: Array<{ path: string; expandedPath: string; exists: boolean }>;
+  fileSources: Array<{ name: string; roots: Array<{ path: string; expandedPath: string; exists: boolean }> }>;
   explicitRoots: boolean;
   shareServerUrl: string;
   warnings: string[];
@@ -417,6 +443,26 @@ async function describeConfig(config: RuntimeSpecHubConfig): Promise<{
       return { path: raw, expandedPath: expanded, exists };
     })
   );
+  const fileSources = await Promise.all(
+    (stored.sources ?? [])
+      .filter((source) => source?.mode === "files")
+      .map(async (source) => ({
+        name: source.name,
+        roots: await Promise.all(
+          (source.roots ?? []).map(async (raw) => {
+            const expanded = expandHome(raw);
+            let exists = false;
+            try {
+              const info = await stat(expanded);
+              exists = info.isDirectory();
+            } catch {
+              exists = false;
+            }
+            return { path: raw, expandedPath: expanded, exists };
+          })
+        )
+      }))
+  );
   const warnings: string[] = [];
   const configProblem = await describeConfigFileProblem(configPath);
   if (configProblem) warnings.push(configProblem);
@@ -427,6 +473,7 @@ async function describeConfig(config: RuntimeSpecHubConfig): Promise<{
   return {
     configPath,
     roots,
+    fileSources,
     explicitRoots,
     shareServerUrl: resolved.shareServerUrl ?? "",
     warnings

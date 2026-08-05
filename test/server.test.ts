@@ -221,6 +221,59 @@ describe("server routes", () => {
       .expect(400);
   });
 
+  it("adds a file folder that loads all Markdown/HTML under its path", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-server-files-"));
+    const folder = path.join(root, "notes");
+    await mkdir(path.join(folder, "sub"), { recursive: true });
+    await writeFile(path.join(folder, "one.md"), "# One\n");
+    await writeFile(path.join(folder, "sub", "two.html"), "<title>Two</title>");
+    const configPath = path.join(root, "config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify({
+        roots: [root],
+        sources: [{ name: "repositories", mode: "repositories", roots: [root], patterns: ["docs/specs/**/*.{md,html}"] }]
+      })
+    );
+    const app = createApp({ configPath });
+
+    const patched = await request(app)
+      .patch("/api/config/files")
+      .send({ sources: [{ name: "notes", roots: [folder] }] })
+      .expect(200);
+    expect(patched.body.fileSources).toEqual([
+      { name: "notes", roots: [{ path: folder, expandedPath: folder, exists: true }] }
+    ]);
+
+    const onDisk = JSON.parse(await readFile(configPath, "utf8")) as {
+      sources: Array<{ name: string; mode: string; roots: string[] }>;
+    };
+    expect(onDisk.sources.map((source) => source.mode)).toEqual(["repositories", "files"]);
+    expect(onDisk.sources[1]).toEqual({ name: "notes", mode: "files", roots: [folder] });
+
+    const list = await request(app).get("/api/docs").expect(200);
+    const folderDocs = (list.body.docs as Array<{ sourceName: string; relativePath: string }>)
+      .filter((doc) => doc.sourceName === "notes");
+    expect(folderDocs.map((doc) => doc.relativePath).sort()).toEqual(["one.md", "sub/two.html"]);
+  });
+
+  it("rejects invalid file-folder payloads with 400", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-server-files-invalid-"));
+    const configPath = path.join(root, "config.json");
+    await writeFile(configPath, JSON.stringify({ roots: [root] }));
+    const app = createApp({ configPath });
+
+    await request(app)
+      .patch("/api/config/files")
+      .send({ sources: "nope" })
+      .expect(400);
+
+    await request(app)
+      .patch("/api/config/files")
+      .send({ sources: [{ name: "notes", roots: [42] }] })
+      .expect(400);
+  });
+
   it("persists and clears the public share server URL", async () => {
     const root = await mkdtemp(path.join(tmpdir(), "spechub-server-share-config-"));
     const configPath = path.join(root, "config.json");

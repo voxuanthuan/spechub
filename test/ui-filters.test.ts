@@ -142,4 +142,73 @@ describe("dashboard document filters", () => {
       tag: "backend"
     }).map((doc) => doc.id)).toEqual(["a"]);
   });
+
+  it("filters by triage state and workflow artifact, and summarizes state counts", async () => {
+    const page = await import("../app/page.js");
+    const base = {
+      kind: "markdown",
+      category: "doc",
+      sourceName: "repositories",
+      repoName: "repo",
+      repoRoot: "/repo",
+      modifiedAt: "2026-06-08T00:00:00.000Z",
+      sizeBytes: 10
+    } as const;
+    const docs = [
+      {
+        ...base,
+        id: "ticket-1",
+        title: "Provider choice",
+        sourceTitle: "Provider choice",
+        absolutePath: "/repo/.scratch/auth/issues/01-provider.md",
+        relativePath: ".scratch/auth/issues/01-provider.md",
+        mtimeMs: Date.now(),
+        workflow: { artifact: "wayfinder-ticket", effort: "auth", ticketNumber: "01", triageState: "ready-for-agent", ticketStatus: "open" }
+      },
+      {
+        ...base,
+        id: "ticket-2",
+        title: "Session storage",
+        sourceTitle: "Session storage",
+        absolutePath: "/repo/.scratch/auth/issues/02-session.md",
+        relativePath: ".scratch/auth/issues/02-session.md",
+        mtimeMs: Date.now(),
+        workflow: { artifact: "wayfinder-ticket", effort: "auth", ticketNumber: "02", triageState: "needs-info", ticketStatus: "claimed" }
+      },
+      {
+        ...base,
+        id: "map-1",
+        title: "Auth map",
+        sourceTitle: "Auth map",
+        absolutePath: "/repo/.scratch/auth/map.md",
+        relativePath: ".scratch/auth/map.md",
+        mtimeMs: Date.now(),
+        workflow: { artifact: "wayfinder-map", effort: "auth" }
+      },
+      {
+        ...base,
+        id: "plain-1",
+        title: "Roadmap",
+        sourceTitle: "Roadmap",
+        absolutePath: "/repo/docs/plans/roadmap.md",
+        relativePath: "docs/plans/roadmap.md",
+        mtimeMs: Date.now()
+      }
+    ] satisfies Parameters<typeof page.filterDocs>[0];
+
+    const filters = { repo: "all", query: "", category: "all", date: "all", path: "" } as const;
+
+    expect(page.filterDocs(docs, { ...filters, triageState: "ready-for-agent" }).map((doc) => doc.id)).toEqual(["ticket-1"]);
+    expect(page.filterDocs(docs, { ...filters, artifact: "wayfinder-map" }).map((doc) => doc.id)).toEqual(["map-1"]);
+    expect(page.filterDocs(docs, { ...filters, triageState: "all", artifact: "all" })).toHaveLength(4);
+    // Workflow fields participate in free-text search.
+    expect(page.filterDocs(docs, { ...filters, query: "needs-info" }).map((doc) => doc.id)).toEqual(["ticket-2"]);
+    expect(page.summarizeTriageStates(docs)).toEqual([
+      { state: "needs-triage", count: 0 },
+      { state: "needs-info", count: 1 },
+      { state: "ready-for-agent", count: 1 },
+      { state: "ready-for-human", count: 0 },
+      { state: "wontfix", count: 0 }
+    ]);
+  });
 });
