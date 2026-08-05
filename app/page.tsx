@@ -26,9 +26,10 @@ import {
   saveAnnotation,
   subscribeDocsChanged,
   unshareDocument,
-  updateConfig
+  updateConfig,
+  updateFileSources
 } from "./lib/api.js";
-import { filterDocs, normalizeRepoNames, summarizeRepos } from "./lib/filters.js";
+import { filterDocs, normalizeRepoNames, summarizeRepos, summarizeTriageStates } from "./lib/filters.js";
 import { formatDate, formatLiveTime } from "./lib/format.js";
 import { sanitizeMarkdown } from "./lib/sanitize.js";
 import {
@@ -36,9 +37,9 @@ import {
   readStoredAccent, readStoredDensity, readStoredHiddenRepos, readStoredView
 } from "./lib/storage.js";
 import type {
-  Accent, AccentTokens, ActiveView, CategoryFilter, ConfigInfo,
-  ConfigRoot, DateFilter, Density, DocumentDetail, DocumentMeta,
-  DocumentShare, DraftRoot, RepoSummary, SpecHubState
+  Accent, AccentTokens, ActiveView, ArtifactFilter, CategoryFilter, ConfigInfo,
+  ConfigFileSource, ConfigRoot, DateFilter, Density, DocumentDetail, DocumentMeta,
+  DocumentShare, DraftFileSource, DraftRoot, RepoSummary, SpecHubState, TriageStateFilter, WorkflowArtifact
 } from "./lib/types.js";
 import {
   filterPromptCards,
@@ -100,6 +101,8 @@ export default function Home() {
   const [tagDraft, setTagDraft] = useState("");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<CategoryFilter>("all");
+  const [triageState, setTriageState] = useState<TriageStateFilter>("all");
+  const [artifact, setArtifact] = useState<ArtifactFilter>("all");
   const [date, setDate] = useState<DateFilter>("all");
   const [path, setPath] = useState("");
   const [summary, setSummary] = useState("Indexing local files...");
@@ -123,6 +126,9 @@ export default function Home() {
   const [settingsInfo, setSettingsInfo] = useState<ConfigInfo | null>(null);
   const [draftRoots, setDraftRoots] = useState<DraftRoot[]>([]);
   const [addRootDraft, setAddRootDraft] = useState("");
+  const [draftFileSources, setDraftFileSources] = useState<DraftFileSource[]>([]);
+  const [addFileSourceName, setAddFileSourceName] = useState("");
+  const [addFileSourceRoot, setAddFileSourceRoot] = useState("");
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsError, setSettingsError] = useState<string | null>(null);
   const [draftShareServerUrl, setDraftShareServerUrl] = useState("");
@@ -312,10 +318,32 @@ export default function Home() {
     return [...tags].sort((left, right) => left.localeCompare(right));
   }, [appState.tags]);
   const filteredDocs = useMemo(
-    () => filterDocs(docs, { repo, query: deferredQuery, category, date, path, hiddenRepos, state: appState, favoritesOnly, tag }),
-    [appState, category, date, deferredQuery, docs, favoritesOnly, hiddenRepos, path, repo, tag]
+    () => filterDocs(docs, { repo, query: deferredQuery, category, date, path, hiddenRepos, state: appState, favoritesOnly, tag, triageState, artifact }),
+    [appState, artifact, category, date, deferredQuery, docs, favoritesOnly, hiddenRepos, path, repo, tag, triageState]
   );
   filteredDocsRef.current = filteredDocs;
+  // Chip counts reflect every filter except the triage-state filter itself, so
+  // selecting a chip doesn't collapse the other counts (GitHub-label behaviour).
+  const chipBaseDocs = useMemo(
+    () => filterDocs(docs, { repo, query: deferredQuery, category, date, path, hiddenRepos, state: appState, favoritesOnly, tag, artifact }),
+    [appState, artifact, category, date, deferredQuery, docs, favoritesOnly, hiddenRepos, path, repo, tag]
+  );
+  const triageSummary = useMemo(() => summarizeTriageStates(chipBaseDocs), [chipBaseDocs]);
+  const showTriageChips = useMemo(() => triageSummary.some((entry) => entry.count > 0), [triageSummary]);
+  // Queue walking: when a triage chip is active the filtered list IS the bucket;
+  // walk it oldest-first, mirroring /triage's ordering.
+  const queueNav = useMemo(() => {
+    if (triageState === "all" || !selectedDoc) return null;
+    const queue = [...filteredDocs].reverse();
+    const index = queue.findIndex((doc) => doc.id === selectedDoc.id);
+    if (index === -1) return null;
+    return {
+      prevId: index > 0 ? queue[index - 1].id : null,
+      nextId: index < queue.length - 1 ? queue[index + 1].id : null,
+      position: index + 1,
+      total: queue.length
+    };
+  }, [filteredDocs, selectedDoc, triageState]);
   const promptCategorySummaries = useMemo(() => summarizePromptCategories(promptCards), []);
   const filteredPrompts = useMemo(
     () => filterPromptCards(promptCards, { category: promptCategory, query: deferredPromptQuery, tag: promptTag }),
@@ -631,6 +659,8 @@ export default function Home() {
     setTag("all");
     setQuery("");
     setCategory("all");
+    setTriageState("all");
+    setArtifact("all");
     setDate("all");
     setPath("");
   }
@@ -643,6 +673,7 @@ export default function Home() {
       const info = await fetchConfig();
       setSettingsInfo(info);
       setDraftRoots(info.roots.map(toDraftRoot));
+      setDraftFileSources(info.fileSources.map(toDraftFileSource));
       setDraftShareServerUrl(info.shareServerUrl);
     } catch (reason) {
       setSettingsInfo(null);
@@ -673,6 +704,23 @@ export default function Home() {
     setAddRootDraft("");
   }
 
+  function updateDraftFileSource(id: string, patch: Partial<Pick<DraftFileSource, "name" | "path">>) {
+    setDraftFileSources((current) => current.map((entry) => (entry.id === id ? { ...entry, ...patch } : entry)));
+  }
+
+  function removeDraftFileSource(id: string) {
+    setDraftFileSources((current) => current.filter((entry) => entry.id !== id));
+  }
+
+  function addDraftFileSource() {
+    const name = addFileSourceName.trim();
+    const root = addFileSourceRoot.trim();
+    if (!name || !root) return;
+    setDraftFileSources((current) => [...current, { id: createDraftId(), name, path: root }]);
+    setAddFileSourceName("");
+    setAddFileSourceRoot("");
+  }
+
   async function saveSettings() {
     const candidate = draftRoots.map((entry) => entry.path.trim()).filter((entry) => entry.length > 0);
     if (candidate.length === 0) {
@@ -682,14 +730,24 @@ export default function Home() {
     setSettingsError(null);
     setSettingsSaving(true);
     try {
-      const info = await updateConfig(candidate, draftShareServerUrl);
+      let info = await updateConfig(candidate, draftShareServerUrl);
+      const fileSources = draftFileSources
+        .map((entry) => ({ name: entry.name.trim(), roots: [entry.path.trim()] }))
+        .filter((entry) => entry.name && entry.roots[0]);
+      // Only rewrite the sources array when file folders are (or were) configured —
+      // for a plain roots-only config that would drop the auto-derived agent sources.
+      const hadFileSources = (settingsInfo?.fileSources?.length ?? 0) > 0;
+      if (fileSources.length > 0 || hadFileSources) {
+        info = await updateFileSources(fileSources);
+      }
       setSettingsInfo(info);
       setDraftRoots(info.roots.map(toDraftRoot));
+      setDraftFileSources(info.fileSources.map(toDraftFileSource));
       setDraftShareServerUrl(info.shareServerUrl);
       setSettingsOpen(false);
       await loadDocs({ force: true });
     } catch (reason) {
-      setSettingsError(reason instanceof Error ? reason.message : "Unable to save workspace roots.");
+      setSettingsError(reason instanceof Error ? reason.message : "Unable to save workspace settings.");
     } finally {
       setSettingsSaving(false);
     }
@@ -877,6 +935,22 @@ export default function Home() {
                     <ChevronIcon />
                   </span>
                 </label>
+                <label className="field">
+                  <span>Workflow</span>
+                  <span className="select-wrap">
+                    <select value={artifact} onChange={(event) => setArtifact(event.target.value as ArtifactFilter)}>
+                      <option value="all">All artifacts</option>
+                      <option value="wayfinder-map">Maps</option>
+                      <option value="wayfinder-ticket">Tickets</option>
+                      <option value="feature-spec">Tracker specs</option>
+                      <option value="adr">ADRs</option>
+                      <option value="domain-context">Domain docs</option>
+                      <option value="agent-config">Agent config</option>
+                      <option value="out-of-scope">Out of scope</option>
+                    </select>
+                    <ChevronIcon />
+                  </span>
+                </label>
               </>
             ) : (
               <>
@@ -919,6 +993,25 @@ export default function Home() {
                 : <><b>{filteredPrompts.length}</b> of {promptCards.length} prompts</>}
             </div>
           </div>
+          {activeView === "documents" && showTriageChips ? (
+            <div className="state-chips" role="group" aria-label="Triage state filters">
+              {triageSummary.filter((entry) => entry.count > 0).map((entry) => (
+                <button
+                  key={entry.state}
+                  type="button"
+                  className="state-chip"
+                  data-triage={entry.state}
+                  data-active={triageState === entry.state}
+                  aria-pressed={triageState === entry.state}
+                  title={triageState === entry.state ? `Clear the ${entry.state} filter` : `Show only ${entry.state}`}
+                  onClick={() => setTriageState((current) => (current === entry.state ? "all" : entry.state))}
+                >
+                  {entry.state}
+                  <span className="chip-count">{entry.count}</span>
+                </button>
+              ))}
+            </div>
+          ) : null}
           <div className="list-scroll" aria-live="polite">
             {activeView === "documents" ? (
               filteredDocs.length > 0 ? filteredDocs.map((doc) => (
@@ -961,6 +1054,21 @@ export default function Home() {
                     <span className="kind" data-kind={doc.category}>
                       {doc.category}
                     </span>
+                    {doc.workflow ? (
+                      <span className="wf" data-artifact={doc.workflow.artifact}>
+                        {artifactLabel(doc.workflow.artifact)}
+                      </span>
+                    ) : null}
+                    {doc.workflow?.triageState ? (
+                      <span className="wf" data-triage={doc.workflow.triageState}>
+                        {doc.workflow.triageState}
+                      </span>
+                    ) : null}
+                    {doc.workflow?.ticketStatus && doc.workflow.ticketStatus !== "open" ? (
+                      <span className="wf" data-status={doc.workflow.ticketStatus}>
+                        {doc.workflow.ticketStatus}
+                      </span>
+                    ) : null}
                     <span className="date">{formatDate(doc.modifiedAt)}</span>
                   </div>
                 </div>
@@ -997,6 +1105,58 @@ export default function Home() {
               <span>{selectedCategory}</span>
               <span className="summary-text">{summary}</span>
             </div>
+            {selectedDoc?.workflow ? (
+              <div className="wf-meta" aria-label="Workflow metadata">
+                <span className="wf" data-artifact={selectedDoc.workflow.artifact}>
+                  {artifactLabel(selectedDoc.workflow.artifact)}
+                </span>
+                {selectedDoc.workflow.effort ? <span className="wf-effort">{selectedDoc.workflow.effort}</span> : null}
+                {selectedDoc.workflow.ticketNumber ? <span className="wf-ticket">#{selectedDoc.workflow.ticketNumber}</span> : null}
+                {selectedDoc.workflow.ticketType ? (
+                  <span className="wf" data-type={selectedDoc.workflow.ticketType}>{selectedDoc.workflow.ticketType}</span>
+                ) : null}
+                {selectedDoc.workflow.ticketStatus ? (
+                  <span className="wf" data-status={selectedDoc.workflow.ticketStatus}>{selectedDoc.workflow.ticketStatus}</span>
+                ) : null}
+                {selectedDoc.workflow.triageState ? (
+                  <button
+                    type="button"
+                    className="wf wf-link"
+                    data-triage={selectedDoc.workflow.triageState}
+                    title={`Show all ${selectedDoc.workflow.triageState} documents`}
+                    onClick={() => setTriageState(selectedDoc.workflow?.triageState ?? "all")}
+                  >
+                    {selectedDoc.workflow.triageState}
+                  </button>
+                ) : null}
+                {selectedDoc.workflow.blockedBy?.length ? (
+                  <span className="wf-blocked">blocked by: {selectedDoc.workflow.blockedBy.join(", ")}</span>
+                ) : null}
+                {queueNav ? (
+                  <span className="wf-queue">
+                    <button
+                      type="button"
+                      className="wf-queue-btn"
+                      disabled={!queueNav.prevId}
+                      title={`Previous ${triageState} document (oldest first)`}
+                      onClick={() => queueNav.prevId && setSelectedId(queueNav.prevId)}
+                    >
+                      ← prev
+                    </button>
+                    <span className="wf-queue-pos">{queueNav.position} / {queueNav.total}</span>
+                    <button
+                      type="button"
+                      className="wf-queue-btn"
+                      disabled={!queueNav.nextId}
+                      title={`Next ${triageState} document (oldest first)`}
+                      onClick={() => queueNav.nextId && setSelectedId(queueNav.nextId)}
+                    >
+                      next →
+                    </button>
+                  </span>
+                ) : null}
+              </div>
+            ) : null}
             <div className="dh-row">
               <div className="titleblock">
                 {editingTitle && selectedDoc ? (
@@ -1305,6 +1465,79 @@ export default function Home() {
             </div>
 
             <div className="settings-section">
+              <h3>File folders</h3>
+              <p className="settings-hint">
+                Load every Markdown/HTML file under a folder as its own group (e.g. a
+                <code> .scratch/&lt;effort&gt;</code> directory). Plain folders never match
+                repository scanning, so list them here instead.
+              </p>
+              {draftFileSources.length === 0 ? (
+                <p className="settings-hint">No file folders yet. Add one below.</p>
+              ) : (
+                <ul className="roots-list">
+                  {draftFileSources.map((entry) => (
+                    <li className="root-row file-source-row" key={entry.id}>
+                      <input
+                        className="file-source-name"
+                        type="text"
+                        aria-label="File folder group name"
+                        spellCheck={false}
+                        value={entry.name}
+                        placeholder="Group name"
+                        onChange={(event) => updateDraftFileSource(entry.id, { name: event.target.value })}
+                      />
+                      <input
+                        type="text"
+                        aria-label="File folder path"
+                        spellCheck={false}
+                        value={entry.path}
+                        placeholder="/path/to/folder"
+                        onChange={(event) => updateDraftFileSource(entry.id, { path: event.target.value })}
+                      />
+                      <button
+                        type="button"
+                        className="root-remove"
+                        title="Remove file folder"
+                        aria-label={`Remove ${entry.name || "file folder"}`}
+                        onClick={() => removeDraftFileSource(entry.id)}
+                      >
+                        <TrashIcon />
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <form
+                className="add-root file-source-add"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  addDraftFileSource();
+                }}
+              >
+                <input
+                  type="text"
+                  aria-label="New file folder name"
+                  spellCheck={false}
+                  value={addFileSourceName}
+                  placeholder="Group name"
+                  onChange={(event) => setAddFileSourceName(event.target.value)}
+                />
+                <input
+                  type="text"
+                  aria-label="New file folder path"
+                  spellCheck={false}
+                  value={addFileSourceRoot}
+                  placeholder="/path/to/folder"
+                  onChange={(event) => setAddFileSourceRoot(event.target.value)}
+                />
+                <button className="btn" type="submit" disabled={!addFileSourceName.trim() || !addFileSourceRoot.trim()}>
+                  <PlusIcon />
+                  Add
+                </button>
+              </form>
+            </div>
+
+            <div className="settings-section">
               <h3>Public sharing</h3>
               <label className="field">
                 <span>Share server URL</span>
@@ -1413,7 +1646,21 @@ function useFocusTrap(open: boolean, initialRef: RefObject<HTMLElement | null>) 
   }, [initialRef, open]);
 }
 
-export { filterDocs } from "./lib/filters.js";
+export { filterDocs, summarizeTriageStates } from "./lib/filters.js";
+
+const ARTIFACT_LABELS: Record<WorkflowArtifact, string> = {
+  "wayfinder-map": "map",
+  "wayfinder-ticket": "ticket",
+  "feature-spec": "tracker spec",
+  adr: "ADR",
+  "domain-context": "context",
+  "agent-config": "agent config",
+  "out-of-scope": "out of scope"
+};
+
+function artifactLabel(artifact: WorkflowArtifact): string {
+  return ARTIFACT_LABELS[artifact] ?? artifact;
+}
 
 function RepoFilterRow({
   item,
@@ -1512,6 +1759,10 @@ function PromptSourcePreview({ card }: { card: PromptCard }) {
 
 function toDraftRoot(root: ConfigRoot): DraftRoot {
   return { id: createDraftId(), path: root.path, initial: root };
+}
+
+function toDraftFileSource(source: ConfigFileSource): DraftFileSource {
+  return { id: createDraftId(), name: source.name, path: source.roots[0]?.path ?? "" };
 }
 
 function rootDisplayStatus(entry: DraftRoot): { state: "ok" | "missing" | "new"; label: string } {

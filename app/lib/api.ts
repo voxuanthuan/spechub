@@ -78,6 +78,20 @@ export async function fetchConfig(): Promise<ConfigInfo> {
   return response.json() as Promise<ConfigInfo>;
 }
 
+export async function updateFileSources(sources: Array<{ name: string; roots: string[] }>): Promise<ConfigInfo> {
+  if (isDesktop()) {
+    const { invoke } = await import("@tauri-apps/api/core");
+    return invoke<ConfigInfo>("update_file_sources", { sources });
+  }
+  const response = await fetch("/api/config/files", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ sources })
+  });
+  if (!response.ok) throw new Error(await responseError(response, "Unable to save file folders."));
+  return response.json() as Promise<ConfigInfo>;
+}
+
 export async function updateConfig(roots: string[], shareServerUrl: string): Promise<ConfigInfo> {
   if (isDesktop()) {
     const { invoke } = await import("@tauri-apps/api/core");

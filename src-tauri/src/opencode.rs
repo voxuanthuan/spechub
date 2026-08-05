@@ -290,6 +290,7 @@ fn create_opencode_plan_meta(
             db_path: resolved_db_path.to_string_lossy().to_string(),
             session_id: session.id.clone(),
         }),
+        workflow: None,
     }
 }
 

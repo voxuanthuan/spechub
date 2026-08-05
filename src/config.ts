@@ -32,7 +32,16 @@ const BASE_DOC_PATTERNS = [
   "specs/**/*.{md,html}",
   "Spec.md",
   "spec.md",
-  "plan.md"
+  "plan.md",
+  // Matt Pocock engineering-skills workflow artifacts: the local-markdown issue
+  // tracker, the rejected-feature knowledge base, and domain docs. ADRs under
+  // docs/adr/ and skill config under docs/agents/ are already matched by docs/**.
+  ".scratch/**/*.md",
+  ".out-of-scope/**/*.md",
+  "CONTEXT.md",
+  "CONTEXT-MAP.md",
+  "src/*/CONTEXT.md",
+  "src/*/docs/adr/**/*.{md,markdown}"
 ];
 
 // Agents that create git worktrees nested inside the repo. Docs in these worktrees
@@ -154,10 +163,12 @@ function normalizeSources(
       roots: source.roots.map(expandHome),
       patterns:
         source.mode === "repositories" || source.mode === "worktrees"
-          ? mergeDefaultDocPatterns(source.patterns)
-          : [...source.patterns],
+          ? mergeDefaultDocPatterns(source.patterns ?? [])
+          : [...(source.patterns ?? [])],
       inferRepoFromContent: source.inferRepoFromContent,
-      defaultCategory: source.defaultCategory
+      defaultCategory: source.defaultCategory,
+      include: source.include,
+      exclude: source.exclude
     }));
   }
 
@@ -297,6 +308,49 @@ export async function updateRoots(configPath: string, roots: readonly string[]):
   return normalized;
 }
 
+export interface FileSourceInput {
+  name: string;
+  roots: string[];
+}
+
+/**
+ * Replaces the `files`-mode sources in config with the given list. Non-`files`
+ * sources (e.g. a user's `repositories` source) are preserved. If the config had
+ * no `sources` array yet, a `repositories` source is derived from `roots` so
+ * adding file folders doesn't drop the auto-derived repo scanning.
+ */
+export async function updateFileSources(configPath: string, fileSources: FileSourceInput[]): Promise<void> {
+  const normalized = normalizeFileSources(fileSources);
+  await mutateConfigFile(configPath, (existing) => {
+    const existingSources = existing.sources ?? [];
+    const nonFilesSources = existingSources.filter((source) => source.mode !== "files");
+    const baseSources =
+      nonFilesSources.length > 0
+        ? nonFilesSources
+        : existing.roots?.length
+          ? [{ name: "repositories", mode: "repositories" as const, roots: [...existing.roots] }]
+          : [];
+    return { ...existing, sources: [...baseSources, ...normalized] };
+  });
+}
+
+function normalizeFileSources(fileSources: FileSourceInput[]): SpecHubSource[] {
+  const seen = new Set<string>();
+  const result: SpecHubSource[] = [];
+  for (const entry of fileSources) {
+    if (!entry || typeof entry.name !== "string") continue;
+    const name = entry.name.trim();
+    if (!name || seen.has(name)) continue;
+    const roots = (Array.isArray(entry.roots) ? entry.roots : [])
+      .map((root) => (typeof root === "string" ? expandHome(root.trim()) : ""))
+      .filter(Boolean);
+    if (roots.length === 0) continue;
+    seen.add(name);
+    result.push({ name, mode: "files", roots });
+  }
+  return result;
+}
+
 export async function updateShareServerUrl(configPath: string, shareServerUrl: string): Promise<string | undefined> {
   const normalized = normalizeShareServerUrl(shareServerUrl);
   await mutateConfigFile(configPath, (existing) => {
@@ -320,7 +374,11 @@ export async function resolveConfig(options: {
 
   const roots = (options.roots?.length ? options.roots : fileConfig.roots ?? base.roots).map(expandHome);
   const docPatterns = mergeDefaultDocPatterns(fileConfig.docPatterns ?? base.docPatterns);
-  const restrictAgentStorageToRoots = Boolean(options.roots?.length) || Boolean(fileConfig.roots?.length);
+  // Agent-storage scoping only applies to the auto-derived agent sources. When the
+  // user lists sources explicitly, they control the full list, so their sources
+  // (e.g. a "files" group outside the workspace roots) must not be filtered out.
+  const restrictAgentStorageToRoots =
+    !fileConfig.sources?.length && (Boolean(options.roots?.length) || Boolean(fileConfig.roots?.length));
 
   return {
     roots,

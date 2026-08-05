@@ -72,6 +72,27 @@ pub(crate) enum DocumentContentSource {
     },
 }
 
+/// Mirror of the TypeScript `WorkflowMeta` (Matt Pocock engineering-skills
+/// artifact metadata). The Rust scanner does not parse workflow state yet, so
+/// this is always `None` on desktop — kept so the payload schema stays aligned.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct WorkflowMeta {
+    pub artifact: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub effort: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_number: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub triage_state: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_type: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ticket_status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_by: Option<Vec<String>>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DocumentMeta {
@@ -90,6 +111,8 @@ pub(crate) struct DocumentMeta {
     pub size_bytes: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub content_source: Option<DocumentContentSource>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub workflow: Option<WorkflowMeta>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -659,6 +682,7 @@ fn create_document_meta(
         mtime_ms,
         size_bytes: metadata.len(),
         content_source: Some(DocumentContentSource::File),
+        workflow: None,
     })
 }
 
@@ -876,6 +900,7 @@ pub fn run() {
             sharing::unshare_document,
             settings::get_config_info,
             settings::update_settings,
+            settings::update_file_sources,
         ])
         .run(tauri::generate_context!())
         .expect("error while running SpecHub");

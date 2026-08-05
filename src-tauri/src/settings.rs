@@ -15,12 +15,27 @@ struct ConfigRoot {
 
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct ConfigFileSource {
+    name: String,
+    roots: Vec<ConfigRoot>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub(crate) struct ConfigInfo {
     config_path: String,
     roots: Vec<ConfigRoot>,
+    file_sources: Vec<ConfigFileSource>,
     explicit_roots: bool,
     share_server_url: String,
     warnings: Vec<String>,
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct FileSourceInput {
+    name: String,
+    roots: Vec<String>,
 }
 
 #[tauri::command]
@@ -79,6 +94,76 @@ pub(crate) fn update_settings(
     describe_config()
 }
 
+#[tauri::command]
+pub(crate) fn update_file_sources(
+    sources: Vec<FileSourceInput>,
+    state: tauri::State<'_, AppState>,
+) -> Result<ConfigInfo, String> {
+    let path = config_path();
+    let mut value = match fs::read_to_string(&path) {
+        Ok(raw) => serde_json::from_str::<Value>(&raw)
+            .map_err(|_| format!("Config file could not be parsed: {}", path.display()))?,
+        Err(_) => serde_json::json!({}),
+    };
+    let object = value
+        .as_object_mut()
+        .ok_or_else(|| "Config file must contain a JSON object.".to_string())?;
+
+    let existing_sources = object
+        .get("sources")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let mut next_sources: Vec<Value> = existing_sources
+        .into_iter()
+        .filter(|source| source.get("mode").and_then(Value::as_str) != Some("files"))
+        .collect();
+    if next_sources.is_empty() {
+        if let Some(roots) = object.get("roots").and_then(Value::as_array).cloned() {
+            next_sources.push(serde_json::json!({
+                "name": "repositories",
+                "mode": "repositories",
+                "roots": roots
+            }));
+        }
+    }
+    for file_source in normalize_file_sources(sources) {
+        next_sources.push(serde_json::json!({
+            "name": file_source.name,
+            "mode": "files",
+            "roots": file_source.roots
+        }));
+    }
+    object.insert("sources".to_string(), Value::Array(next_sources));
+
+    write_json_atomic(&path, &value, true)?;
+
+    let docs = scan_documents_inner(&resolve_config()?)?;
+    *state
+        .cached_docs
+        .lock()
+        .map_err(|error| error.to_string())? = docs;
+    describe_config()
+}
+
+fn normalize_file_sources(sources: Vec<FileSourceInput>) -> Vec<FileSourceInput> {
+    let mut seen = BTreeSet::new();
+    let mut result = Vec::new();
+    for source in sources {
+        let name = source.name.trim().to_string();
+        if name.is_empty() || seen.contains(&name) {
+            continue;
+        }
+        let roots = normalize_roots(source.roots);
+        if roots.is_empty() {
+            continue;
+        }
+        seen.insert(name.clone());
+        result.push(FileSourceInput { name, roots });
+    }
+    result
+}
+
 fn describe_config() -> Result<ConfigInfo, String> {
     let path = config_path();
     let mut warnings = Vec::new();
@@ -123,9 +208,46 @@ fn describe_config() -> Result<ConfigInfo, String> {
             }
         })
         .collect();
+    let file_sources = stored
+        .get("sources")
+        .and_then(Value::as_array)
+        .map(|sources| {
+            sources
+                .iter()
+                .filter(|source| source.get("mode").and_then(Value::as_str) == Some("files"))
+                .map(|source| ConfigFileSource {
+                    name: source
+                        .get("name")
+                        .and_then(Value::as_str)
+                        .unwrap_or_default()
+                        .to_string(),
+                    roots: source
+                        .get("roots")
+                        .and_then(Value::as_array)
+                        .map(|items| {
+                            items
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .map(ToString::to_string)
+                                .map(|root| {
+                                    let expanded = expand_home(&root);
+                                    ConfigRoot {
+                                        path: root,
+                                        expanded_path: expanded.to_string_lossy().to_string(),
+                                        exists: expanded.is_dir(),
+                                    }
+                                })
+                                .collect()
+                        })
+                        .unwrap_or_default(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     Ok(ConfigInfo {
         config_path: path.to_string_lossy().to_string(),
         roots,
+        file_sources,
         explicit_roots: false,
         share_server_url: resolved.share_server_url.unwrap_or_default(),
         warnings,

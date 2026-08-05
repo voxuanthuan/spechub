@@ -7,6 +7,7 @@ import micromatch from "micromatch";
 import { defaultConfig, normalizeOverridePath } from "./config.js";
 import { scanOpenCodePlanSource } from "./opencode.js";
 import { findHintByPath, inferRepoFromContent, normalizePath, type RepoHint } from "./paths.js";
+import { buildWorkflowMeta } from "./workflow.js";
 import type { DocumentCategory, DocumentKind, DocumentMeta, SpecHubConfig, SpecHubSource } from "./types.js";
 
 const MARKDOWN_EXTENSIONS = new Set([".md", ".markdown"]);
@@ -77,6 +78,13 @@ async function scanSource(
     return docs.flat();
   }
 
+  if (source.mode === "files") {
+    const docs = await Promise.all(
+      source.roots.map((root) => scanFilesRoot(root, source, ignorePatterns, titleOverrides))
+    );
+    return docs.flat();
+  }
+
   if (source.mode === "worktrees") {
     const docs = await Promise.all(
       source.roots.map((root) => scanWorktreesRoot(root, source, ignorePatterns, titleOverrides))
@@ -86,7 +94,7 @@ async function scanSource(
 
   const repoRoots = await discoverRepositoryRoots(source.roots, ignorePatterns);
   const docs = await Promise.all(
-    repoRoots.map((repoRoot) => scanRepository(repoRoot, source.patterns, ignorePatterns, titleOverrides, source.name, [], source.defaultCategory))
+    repoRoots.map((repoRoot) => scanRepository(repoRoot, source.patterns ?? [], ignorePatterns, titleOverrides, source.name, [], source.defaultCategory))
   );
   return docs.flat();
 }
@@ -102,7 +110,7 @@ async function scanDirectRoot(
   if (!(await pathExists(repoRoot))) return [];
   return scanRepository(
     repoRoot,
-    source.patterns,
+    source.patterns ?? [],
     ignorePatterns,
     titleOverrides,
     source.name,
@@ -110,6 +118,37 @@ async function scanDirectRoot(
     source.defaultCategory,
     source.name
   );
+}
+
+/**
+ * `files`-mode scan: loads every Markdown/HTML file under the root (recursively),
+ * grouping them under the source name so they surface as a single named group in
+ * the dashboard. `include` narrows the set, `exclude` always drops matches.
+ */
+async function scanFilesRoot(
+  root: string,
+  source: SpecHubSource,
+  ignorePatterns: string[],
+  titleOverrides: Record<string, string>
+): Promise<DocumentMeta[]> {
+  const filesRoot = path.resolve(root);
+  if (!(await pathExists(filesRoot))) return [];
+  const patterns = source.include?.length ? source.include : ["**/*.{md,markdown,html}"];
+  const paths = await fg(patterns, {
+    cwd: filesRoot,
+    onlyFiles: true,
+    absolute: false,
+    dot: false,
+    unique: true,
+    ignore: [...toFastGlobIgnore(ignorePatterns), ...(source.exclude ?? [])]
+  });
+
+  const docs = await Promise.all(
+    paths.map((relativePath) =>
+      createDocumentMeta(filesRoot, relativePath, titleOverrides, source.name, [], source.defaultCategory, source.name)
+    )
+  );
+  return docs.filter((doc): doc is DocumentMeta => Boolean(doc));
 }
 
 async function scanWorktreesRoot(
@@ -130,7 +169,7 @@ async function scanWorktreesRoot(
         worktrees.map((worktree) =>
           scanRepository(
             path.join(groupPath, worktree),
-            source.patterns,
+            source.patterns ?? [],
             ignorePatterns,
             titleOverrides,
             source.name,
@@ -345,6 +384,7 @@ async function createDocumentMeta(
     const sourceTitle = extractTitle(head, relativePath, kind);
     const override = titleOverrides[normalizeOverridePath(absolutePath)];
     const pathRepo = findHintByPath(absolutePath, repoHints);
+    const workflow = buildWorkflowMeta(relativePath, head);
     let contentRepo: string | undefined;
     if (!pathRepo && repoHints.length > 0) {
       const full = await readFile(absolutePath, "utf8");
@@ -357,6 +397,7 @@ async function createDocumentMeta(
       kind,
       category: defaultCategory ?? inferCategory(relativePath),
       sourceName,
+      ...(workflow ? { workflow } : {}),
       absolutePath,
       relativePath: normalizePath(relativePath),
       repoName: pathRepo?.name ?? contentRepo ?? repoNameOverride ?? path.basename(repoRoot),

@@ -6,6 +6,7 @@ import {
   normalizeShareServerUrl,
   readConfigFile,
   resolveConfig,
+  updateFileSources,
   updateRoots,
   updateShareServerUrl
 } from "../src/config.js";
@@ -65,6 +66,26 @@ describe("resolveConfig", () => {
 
     const config = await resolveConfig({ configPath });
     expect(config.restrictAgentStorageToRoots).toBe(false);
+  });
+
+  it("does not scope explicit sources when roots are also configured", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-config-explicit-sources-"));
+    const configPath = path.join(root, "config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify(
+        {
+          roots: ["~/workspace/work"],
+          sources: [{ name: "research", mode: "files", roots: ["~/workspace/research"] }]
+        },
+        null,
+        2
+      )
+    );
+
+    const config = await resolveConfig({ configPath });
+    expect(config.restrictAgentStorageToRoots).toBe(false);
+    expect(config.sources).toHaveLength(1);
   });
 });
 
@@ -152,6 +173,69 @@ describe("updateRoots", () => {
     await updateRoots(configPath, ["~/work"]);
     const after = (await readConfigFile(configPath)) as { roots: string[] };
     expect(after.roots).toEqual(["~/work"]);
+  });
+});
+
+describe("updateFileSources", () => {
+  it("adds file sources while preserving the repositories source", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-file-sources-"));
+    const configPath = path.join(root, "config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify(
+        {
+          roots: [path.join(root, "repo")],
+          sources: [{ name: "repositories", mode: "repositories", roots: [path.join(root, "repo")] }]
+        },
+        null,
+        2
+      )
+    );
+
+    await updateFileSources(configPath, [{ name: "notes", roots: [path.join(root, "notes")] }]);
+    const after = (await readConfigFile(configPath)) as {
+      sources: Array<{ name: string; mode: string; roots: string[] }>;
+    };
+    expect(after.sources.map((source) => source.mode)).toEqual(["repositories", "files"]);
+    expect(after.sources[1]).toEqual({ name: "notes", mode: "files", roots: [path.join(root, "notes")] });
+  });
+
+  it("derives a repositories source from roots when adding file folders to a legacy config", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-file-sources-legacy-"));
+    const configPath = path.join(root, "config.json");
+    await writeFile(configPath, JSON.stringify({ roots: [path.join(root, "repo")] }, null, 2));
+
+    await updateFileSources(configPath, [{ name: "notes", roots: [path.join(root, "notes")] }]);
+    const after = (await readConfigFile(configPath)) as {
+      sources: Array<{ name: string; mode: string; roots: string[] }>;
+    };
+    expect(after.sources.map((source) => source.mode)).toEqual(["repositories", "files"]);
+    expect(after.sources[0]).toMatchObject({ name: "repositories", roots: [path.join(root, "repo")] });
+  });
+
+  it("removes file sources when given an empty list", async () => {
+    const root = await mkdtemp(path.join(tmpdir(), "spechub-file-sources-clear-"));
+    const configPath = path.join(root, "config.json");
+    await writeFile(
+      configPath,
+      JSON.stringify(
+        {
+          roots: [path.join(root, "repo")],
+          sources: [
+            { name: "repositories", mode: "repositories", roots: [path.join(root, "repo")] },
+            { name: "notes", mode: "files", roots: [path.join(root, "notes")] }
+          ]
+        },
+        null,
+        2
+      )
+    );
+
+    await updateFileSources(configPath, []);
+    const after = (await readConfigFile(configPath)) as {
+      sources: Array<{ name: string; mode: string }>;
+    };
+    expect(after.sources.map((source) => source.mode)).toEqual(["repositories"]);
   });
 });
 
