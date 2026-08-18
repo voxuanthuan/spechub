@@ -44,6 +44,21 @@ describe("hosted share service", () => {
     expect(viewer.text).not.toContain(created.body.secret);
   });
 
+  it("renders a full-page toggle on the public share page", async () => {
+    const dataDir = await mkdtemp(path.join(tmpdir(), "spechub-share-fullview-"));
+    const app = createShareService({ dataDir });
+    const created = await request(app)
+      .post("/api/shares")
+      .send({ document: sharedDocument() })
+      .expect(201);
+
+    const viewer = await request(app).get(`/s/${created.body.id}`).expect(200);
+    expect(viewer.text).toContain('id="fullview-toggle"');
+    expect(viewer.text).toContain('id="fullview-exit"');
+    expect(viewer.text).toContain('classList.toggle("fullview"');
+    expect(viewer.headers["content-security-policy"]).toContain("script-src 'unsafe-inline'");
+  });
+
   it("updates and deletes only with the private management secret", async () => {
     const dataDir = await mkdtemp(path.join(tmpdir(), "spechub-share-manage-"));
     const app = createShareService({ dataDir });
@@ -117,7 +132,7 @@ describe("hosted share service", () => {
 
     const viewer = await request(app).get(`/s/${created.body.id}`).expect(200);
     expect(viewer.text).toContain("sandbox=\"allow-scripts\"");
-    expect(viewer.text).not.toContain("<script>");
+    expect(viewer.text).not.toContain("document.body.dataset.ready");
 
     const raw = await request(app).get(`/s/${created.body.id}/raw`).expect(200);
     expect(raw.headers["content-security-policy"]).toContain("connect-src 'none'");
