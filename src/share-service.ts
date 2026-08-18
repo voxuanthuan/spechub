@@ -112,6 +112,7 @@ export function createShareService(options: ShareServiceOptions = {}): Express {
     response.setHeader("Cache-Control", "public, max-age=30, stale-while-revalidate=300");
     response.setHeader("Content-Security-Policy", [
       "default-src 'none'",
+      "script-src 'unsafe-inline'",
       "style-src 'unsafe-inline'",
       "img-src data: https:",
       "font-src data: https:",
@@ -317,6 +318,10 @@ function renderSharePage(share: StoredShare): string {
   <header>
     <a href="https://github.com/voxuanthuan/spechub" rel="noreferrer">SpecHub</a>
     <span>Shared ${escapeHtml(document.category)}</span>
+    <button id="fullview-toggle" class="fullview-toggle" type="button" aria-pressed="false" aria-label="View full page" title="View full page (Esc to exit)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 3H5a2 2 0 0 0-2 2v3"/><path d="M21 8V5a2 2 0 0 0-2-2h-3"/><path d="M3 16v3a2 2 0 0 0 2 2h3"/><path d="M16 21h3a2 2 0 0 0 2-2v-3"/></svg>
+      <span>Full view</span>
+    </button>
   </header>
   <main>
     <section class="meta">
@@ -326,6 +331,33 @@ function renderSharePage(share: StoredShare): string {
     </section>
     <section class="document">${content}</section>
   </main>
+  <button id="fullview-exit" class="fullview-exit" type="button" hidden aria-label="Exit full view">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12"/></svg>
+    <span>Exit</span>
+  </button>
+  <script>
+(function () {
+  var root = document.documentElement;
+  var toggle = document.getElementById("fullview-toggle");
+  var exit = document.getElementById("fullview-exit");
+  function setFullview(on) {
+    root.classList.toggle("fullview", on);
+    toggle.setAttribute("aria-pressed", String(on));
+    exit.hidden = !on;
+  }
+  toggle.addEventListener("click", function () {
+    setFullview(!root.classList.contains("fullview"));
+  });
+  exit.addEventListener("click", function () {
+    setFullview(false);
+  });
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape" && root.classList.contains("fullview")) {
+      setFullview(false);
+    }
+  });
+})();
+  </script>
 </body>
 </html>`;
 }
@@ -355,11 +387,14 @@ function sharePageStyles(): string {
   return `
 :root{color-scheme:light dark;font-family:Inter,ui-sans-serif,system-ui,sans-serif;background:#f6f7f8;color:#202326}
 *{box-sizing:border-box}body{margin:0}header{height:54px;padding:0 24px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #dfe3e6;background:#fff;color:#667078}header a{color:#18794e;font-weight:750;text-decoration:none}
+.fullview-toggle{display:inline-flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid #dfe3e6;border-radius:8px;background:#fff;color:#39424a;font:600 13px/1 inherit;cursor:pointer}.fullview-toggle:hover,.fullview-toggle[aria-pressed="true"]{border-color:#18794e;color:#18794e}.fullview-toggle svg{width:15px;height:15px}
 main{width:min(980px,calc(100% - 32px));margin:0 auto;padding:48px 0 80px}.meta{margin-bottom:24px}.meta p,.meta time{color:#69727a;font:12px ui-monospace,monospace}.meta h1{margin:8px 0;font-size:30px;line-height:1.2}
 .document{min-height:300px;padding:clamp(22px,4vw,56px);border:1px solid #dfe3e6;border-radius:14px;background:#fff;box-shadow:0 10px 35px rgb(20 30 40 / .07)}
 .markdown{max-width:780px;margin:0 auto;font-size:16px;line-height:1.7}.markdown h1,.markdown h2,.markdown h3{line-height:1.25;margin-top:1.6em}.markdown pre{overflow:auto;padding:16px;border-radius:9px;background:#17191b;color:#f7f7f7}.markdown code{font-family:ui-monospace,monospace}.markdown table{border-collapse:collapse;width:100%}.markdown th,.markdown td{padding:8px 10px;border:1px solid #dfe3e6}.markdown img{max-width:100%}.markdown a{color:#18794e}
 iframe{display:block;width:100%;height:75vh;border:0;background:#fff}
-@media(prefers-color-scheme:dark){:root{background:#151719;color:#eef0f1}header,.document{background:#1e2124;border-color:#33383d}.meta p,.meta time,header{color:#a7afb6}.markdown th,.markdown td{border-color:#3b4146}}
+.fullview-exit{position:fixed;top:14px;right:14px;z-index:10;display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border:1px solid #dfe3e6;border-radius:999px;background:rgb(255 255 255 / .92);color:#39424a;font:600 13px/1 inherit;cursor:pointer;box-shadow:0 4px 16px rgb(20 30 40 / .12)}.fullview-exit[hidden]{display:none}.fullview-exit:hover{border-color:#18794e;color:#18794e}.fullview-exit svg{width:15px;height:15px}
+html.fullview,html.fullview body{height:100%}html.fullview body{overflow:hidden}html.fullview header,html.fullview .meta{display:none}html.fullview main{width:100%;max-width:none;margin:0;padding:0}html.fullview .document{min-height:100vh;border:0;border-radius:0;box-shadow:none;padding:0}html.fullview .markdown{padding:clamp(22px,4vw,56px)}html.fullview iframe{height:100vh}
+@media(prefers-color-scheme:dark){:root{background:#151719;color:#eef0f1}header,.document{background:#1e2124;border-color:#33383d}.fullview-toggle{background:#1e2124;border-color:#33383d;color:#eef0f1}.fullview-exit{background:rgb(30 33 36 / .92);border-color:#33383d;color:#eef0f1}.meta p,.meta time,header{color:#a7afb6}.markdown th,.markdown td{border-color:#3b4146}}
 @media(max-width:600px){header{padding:0 16px}main{padding-top:28px}.document{padding:20px}.meta h1{font-size:24px}}
 `;
 }
